@@ -1,0 +1,15 @@
+**/__pycache__/
+*.egg-info
+
+*.cursor
+logs/**
+.vscode/**
+.git_info/**
+outputs/**
+wandb/**
+assets/**
+agile/data/policy/eval/**
+
+**/exported/**
+
+*IO_descriptors.yaml
