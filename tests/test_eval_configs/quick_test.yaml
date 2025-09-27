@@ -1,0 +1,34 @@
+# Quick test config for CI - deterministic evaluation system test
+# Runs in ~30 seconds with minimal resources
+evaluation:
+  task_name: "Velocity-Height-G1-v0"
+  num_envs: 2
+  episode_length_s: 5.0 # Short episode for speed
+  num_episodes: 1
+  # Environment overrides for deterministic testing
+  env_overrides:
+    events:
+      disable_interval_events: true # Disable disturbances for reproducibility
+  environments:
+    # Environment 0: X-velocity test (2 commands)
+    - env_ids: [0]
+      name: "quick_x_test"
+      sweep:
+        interval: 2.5 # Change every 2.5 seconds
+        commands:
+          base_velocity:
+            lin_vel_x: [0.0, 0.5]
+            lin_vel_y: 0.0
+            ang_vel_z: 0.0
+            base_height: 0.72
+    # Environment 1: Height test (2 commands)
+    - env_ids: [1]
+      name: "quick_height_test"
+      sweep:
+        interval: 2.5
+        commands:
+          base_velocity:
+            lin_vel_x: 0.0
+            lin_vel_y: 0.0
+            ang_vel_z: 0.0
+            base_height: [0.65, 0.72]
