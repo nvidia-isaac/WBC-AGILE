@@ -1,0 +1,19 @@
+# Yaw rate sweep test
+# Tests robot's ability to track different turning rates
+# Command changes every 5 seconds
+evaluation:
+  task_name: "Velocity-Height-G1-Dev-v0"
+  num_envs: 1
+  episode_length_s: 50.0
+  num_episodes: 1
+  environments:
+    - env_ids: [0]
+      name: "yaw_rate_sweep"
+      sweep:
+        interval: 5.0
+        commands:
+          base_velocity:
+            lin_vel_x: 0.0
+            lin_vel_y: 0.0
+            ang_vel_z: [-1.0, -0.5, 0.0, 0.5, 1.0]
+            base_height: 0.70 # Use 0.70 (within task's 0.40-0.72 range)

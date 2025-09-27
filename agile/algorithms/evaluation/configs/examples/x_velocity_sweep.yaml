@@ -1,0 +1,19 @@
+# X-axis velocity sweep test
+# Tests robot's ability to track different forward/backward velocities
+# Command changes every 5 seconds
+evaluation:
+  task_name: "Velocity-Height-G1-Dev-v0"
+  num_envs: 1
+  episode_length_s: 30.0 # Longer than training (30s) to test multiple command changes
+  num_episodes: 1
+  environments:
+    - env_ids: [0]
+      name: "x_velocity_sweep"
+      sweep:
+        interval: 5.0 # Change command every 5 seconds
+        commands:
+          base_velocity:
+            lin_vel_x: [-1.0, -0.5, 0.0, 0.5, 1.0] # Sweep through these values
+            lin_vel_y: 0.0
+            ang_vel_z: 0.0
+            base_height: 0.72
