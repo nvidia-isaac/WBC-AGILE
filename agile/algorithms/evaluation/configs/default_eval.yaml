@@ -1,0 +1,56 @@
+# Default evaluation configuration
+# Comprehensive capability test for policy evaluation
+evaluation:
+  task_name: "Velocity-Height-G1-Dev-v0"
+  num_envs: 4
+  episode_length_s: 100.0
+  num_episodes: 1
+  # Environment overrides for deterministic evaluation
+  env_overrides:
+    events:
+      disable_interval_events: true # Disable disturbances (pushes, forces) for reproducibility
+  environments:
+    # Environment 0: X-velocity sweep
+    - env_ids: [0]
+      name: "x_velocity_capability"
+      sweep:
+        interval: 5.0
+        commands:
+          base_velocity:
+            lin_vel_x: [0.1, 0.2, 0.3, 0.4, 0.5, 0.4, 0.2, 0.0, -0.1, -0.2, -0.3, -0.4, -0.5, -0.4, -0.2, 0.0]
+            lin_vel_y: 0.0
+            ang_vel_z: 0.0
+            base_height: 0.72
+    # Environment 1: Y-velocity sweep
+    - env_ids: [1]
+      name: "y_velocity_capability"
+      sweep:
+        interval: 5.0
+        commands:
+          base_velocity:
+            lin_vel_x: 0.0
+            lin_vel_y: [0.1, 0.2, 0.3, 0.4, 0.5, 0.4, 0.2, 0.0, -0.1, -0.2, -0.3, -0.4, -0.5, -0.4, -0.2, 0.0]
+            ang_vel_z: 0.0
+            base_height: 0.72
+    # Environment 2: Yaw rate sweep
+    - env_ids: [2]
+      name: "yaw_rate_capability"
+      sweep:
+        interval: 5.0
+        commands:
+          base_velocity:
+            lin_vel_x: 0.0
+            lin_vel_y: 0.0
+            ang_vel_z: [0.1, 0.2, 0.3, 0.4, 0.5, 0.4, 0.2, 0.0, -0.1, -0.2, -0.3, -0.4, -0.5, -0.4, -0.2, 0.0]
+            base_height: 0.72
+    # Environment 3: Height sweep
+    - env_ids: [3]
+      name: "height_capability"
+      sweep:
+        interval: 5.0
+        commands:
+          base_velocity:
+            lin_vel_x: 0.0
+            lin_vel_y: 0.0
+            ang_vel_z: 0.0
+            base_height: [0.72, 0.65, 0.60, 0.55, 0.50, 0.45, 0.40, 0.35, 0.40, 0.45, 0.50, 0.55, 0.60, 0.65, 0.70, 0.72]
