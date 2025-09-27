@@ -1,0 +1,14 @@
+# Add directories or file patterns to ignore during indexing (e.g. foo/ or *.csv)
+
+*.github
+**/__pycache__/
+*.egg-info
+
+*.STL
+*.stl
+*.obj
+*.OBJ
+*.ply
+*.PLY
+*.off
+*.OFF

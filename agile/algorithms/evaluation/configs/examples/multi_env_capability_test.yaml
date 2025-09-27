@@ -1,0 +1,53 @@
+# Multi-environment capability test
+# Each environment tests a different capability simultaneously
+# This allows parallel testing of multiple aspects
+evaluation:
+  task_name: "Velocity-Height-G1-Dev-v0"
+  num_envs: 4
+  episode_length_s: 25.0
+  num_episodes: 1
+  environments:
+    # Environment 0: X-velocity sweep
+    - env_ids: [0]
+      name: "x_velocity_test"
+      sweep:
+        interval: 5.0
+        commands:
+          base_velocity:
+            lin_vel_x: [-1.0, -0.5, 0.0, 0.5, 1.0]
+            lin_vel_y: 0.0
+            ang_vel_z: 0.0
+            base_height: 0.72
+    # Environment 1: Y-velocity sweep
+    - env_ids: [1]
+      name: "y_velocity_test"
+      sweep:
+        interval: 5.0
+        commands:
+          base_velocity:
+            lin_vel_x: 0.0
+            lin_vel_y: [-1.0, -0.5, 0.0, 0.5, 1.0]
+            ang_vel_z: 0.0
+            base_height: 0.72
+    # Environment 2: Yaw rate sweep
+    - env_ids: [2]
+      name: "yaw_rate_test"
+      sweep:
+        interval: 5.0
+        commands:
+          base_velocity:
+            lin_vel_x: 0.0
+            lin_vel_y: 0.0
+            ang_vel_z: [-1.0, -0.5, 0.0, 0.5, 1.0]
+            base_height: 0.72
+    # Environment 3: Height sweep
+    - env_ids: [3]
+      name: "height_test"
+      sweep:
+        interval: 5.0
+        commands:
+          base_velocity:
+            lin_vel_x: 0.0
+            lin_vel_y: 0.0
+            ang_vel_z: 0.0
+            base_height: [0.35, 0.40, 0.50, 0.60, 0.65, 0.72]

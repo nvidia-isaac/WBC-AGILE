@@ -1,0 +1,15 @@
+*.usd filter=lfs diff=lfs merge=lfs -text
+*.mp4 filter=lfs diff=lfs merge=lfs -text
+*.mov filter=lfs diff=lfs merge=lfs -text
+docs/videos/unitree_g1_vel_height_sim2sim.gif filter=lfs diff=lfs merge=lfs -text
+docs/videos/booster_t1_vel_sim2real.gif filter=lfs diff=lfs merge=lfs -text
+docs/videos/booster_t1_vel_sim2sim.gif filter=lfs diff=lfs merge=lfs -text
+docs/videos/unitree_g1_teleop.gif filter=lfs diff=lfs merge=lfs -text
+docs/videos/unitree_g1_vel_height_sim2real.gif filter=lfs diff=lfs merge=lfs -text
+docs/videos/booster_t1_stand_up_sim2sim.gif filter=lfs diff=lfs merge=lfs -text
+docs/figures/evaluation_report_summary.png filter=lfs diff=lfs merge=lfs -text
+docs/figures/evaluation_report_tracking.png filter=lfs diff=lfs merge=lfs -text
+agile/data/policy/velocity_g1/unitree_g1_velocity_history.pt filter=lfs diff=lfs merge=lfs -text
+agile/data/policy/velocity_height_g1/unitree_g1_velocity_height_recurrent_student.pt filter=lfs diff=lfs merge=lfs -text
+agile/data/policy/velocity_t1/booster_t1_velocity_v0.pt filter=lfs diff=lfs merge=lfs -text
+agile/data/policy/velocity_height_g1/unitree_g1_velocity_height_teacher.pt filter=lfs diff=lfs merge=lfs -text
