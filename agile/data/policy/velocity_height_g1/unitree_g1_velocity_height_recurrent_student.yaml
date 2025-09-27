@@ -1,0 +1,757 @@
+observations:
+  policy:
+    - name: generated_commands
+      overloads:
+        clip: null
+        scale: null
+        history_length: 0
+        flatten_history_dim: true
+      extras:
+        description: The generated command from command term in the command manager with the given name.
+        modifiers: null
+      mdp_type: Observation
+      full_path: isaaclab.envs.mdp.observations.generated_commands
+      shape:
+        - 4
+      dtype: torch.float32
+      observation_type: Command
+    - name: base_ang_vel
+      overloads:
+        clip: null
+        scale: null
+        history_length: 0
+        flatten_history_dim: true
+      extras:
+        units: rad/s
+        axes:
+          - X
+          - Y
+          - Z
+        description: Root angular velocity in the asset's root frame.
+        modifiers: null
+      mdp_type: Observation
+      full_path: isaaclab.envs.mdp.observations.base_ang_vel
+      shape:
+        - 3
+      dtype: torch.float32
+      observation_type: RootState
+    - name: projected_gravity
+      overloads:
+        clip: null
+        scale: null
+        history_length: 0
+        flatten_history_dim: true
+      extras:
+        units: m/s^2
+        axes:
+          - X
+          - Y
+          - Z
+        description: Gravity projection on the asset's root frame.
+        modifiers: null
+      mdp_type: Observation
+      full_path: isaaclab.envs.mdp.observations.projected_gravity
+      shape:
+        - 3
+      dtype: torch.float32
+      observation_type: RootState
+    - name: joint_pos_rel
+      overloads:
+        clip: null
+        scale: null
+        history_length: 0
+        flatten_history_dim: true
+      extras:
+        units: rad
+        description: 'The joint positions of the asset w.r.t. the default joint positions. Note: Only the joints configured in :attr:`asset_cfg.joint_ids` will have their positions returned.'
+        modifiers: null
+      mdp_type: Observation
+      full_path: isaaclab.envs.mdp.observations.joint_pos_rel
+      shape:
+        - 43
+      dtype: torch.float32
+      observation_type: JointState
+      joint_names:
+        - left_hip_pitch_joint
+        - right_hip_pitch_joint
+        - waist_yaw_joint
+        - left_hip_roll_joint
+        - right_hip_roll_joint
+        - waist_roll_joint
+        - left_hip_yaw_joint
+        - right_hip_yaw_joint
+        - waist_pitch_joint
+        - left_knee_joint
+        - right_knee_joint
+        - left_shoulder_pitch_joint
+        - right_shoulder_pitch_joint
+        - left_ankle_pitch_joint
+        - right_ankle_pitch_joint
+        - left_shoulder_roll_joint
+        - right_shoulder_roll_joint
+        - left_ankle_roll_joint
+        - right_ankle_roll_joint
+        - left_shoulder_yaw_joint
+        - right_shoulder_yaw_joint
+        - left_elbow_joint
+        - right_elbow_joint
+        - left_wrist_roll_joint
+        - right_wrist_roll_joint
+        - left_wrist_pitch_joint
+        - right_wrist_pitch_joint
+        - left_wrist_yaw_joint
+        - right_wrist_yaw_joint
+        - left_hand_index_0_joint
+        - left_hand_middle_0_joint
+        - left_hand_thumb_0_joint
+        - right_hand_index_0_joint
+        - right_hand_middle_0_joint
+        - right_hand_thumb_0_joint
+        - left_hand_index_1_joint
+        - left_hand_middle_1_joint
+        - left_hand_thumb_1_joint
+        - right_hand_index_1_joint
+        - right_hand_middle_1_joint
+        - right_hand_thumb_1_joint
+        - left_hand_thumb_2_joint
+        - right_hand_thumb_2_joint
+      joint_pos_offsets:
+        - -0.10000000149011612
+        - -0.10000000149011612
+        - 0.0
+        - 0.0
+        - 0.0
+        - 0.0
+        - 0.0
+        - 0.0
+        - 0.0
+        - 0.30000001192092896
+        - 0.30000001192092896
+        - 0.0
+        - 0.0
+        - -0.20000000298023224
+        - -0.20000000298023224
+        - 0.0
+        - 0.0
+        - 0.0
+        - 0.0
+        - 0.0
+        - 0.0
+        - 0.0
+        - 0.0
+        - 0.0
+        - 0.0
+        - 0.0
+        - 0.0
+        - 0.0
+        - 0.0
+        - 0.0
+        - 0.0
+        - 0.0
+        - 0.0
+        - 0.0
+        - 0.0
+        - 0.0
+        - 0.0
+        - 0.0
+        - 0.0
+        - 0.0
+        - 0.0
+        - 0.0
+        - 0.0
+    - name: joint_vel_rel
+      overloads:
+        clip: null
+        scale: 0.10000000149011612
+        history_length: 0
+        flatten_history_dim: true
+      extras:
+        units: rad/s
+        description: 'The joint velocities of the asset w.r.t. the default joint velocities. Note: Only the joints configured in :attr:`asset_cfg.joint_ids` will have their velocities returned.'
+        modifiers: null
+      mdp_type: Observation
+      full_path: isaaclab.envs.mdp.observations.joint_vel_rel
+      shape:
+        - 43
+      dtype: torch.float32
+      observation_type: JointState
+      joint_names:
+        - left_hip_pitch_joint
+        - right_hip_pitch_joint
+        - waist_yaw_joint
+        - left_hip_roll_joint
+        - right_hip_roll_joint
+        - waist_roll_joint
+        - left_hip_yaw_joint
+        - right_hip_yaw_joint
+        - waist_pitch_joint
+        - left_knee_joint
+        - right_knee_joint
+        - left_shoulder_pitch_joint
+        - right_shoulder_pitch_joint
+        - left_ankle_pitch_joint
+        - right_ankle_pitch_joint
+        - left_shoulder_roll_joint
+        - right_shoulder_roll_joint
+        - left_ankle_roll_joint
+        - right_ankle_roll_joint
+        - left_shoulder_yaw_joint
+        - right_shoulder_yaw_joint
+        - left_elbow_joint
+        - right_elbow_joint
+        - left_wrist_roll_joint
+        - right_wrist_roll_joint
+        - left_wrist_pitch_joint
+        - right_wrist_pitch_joint
+        - left_wrist_yaw_joint
+        - right_wrist_yaw_joint
+        - left_hand_index_0_joint
+        - left_hand_middle_0_joint
+        - left_hand_thumb_0_joint
+        - right_hand_index_0_joint
+        - right_hand_middle_0_joint
+        - right_hand_thumb_0_joint
+        - left_hand_index_1_joint
+        - left_hand_middle_1_joint
+        - left_hand_thumb_1_joint
+        - right_hand_index_1_joint
+        - right_hand_middle_1_joint
+        - right_hand_thumb_1_joint
+        - left_hand_thumb_2_joint
+        - right_hand_thumb_2_joint
+      joint_vel_offsets:
+        - 0.0
+        - 0.0
+        - 0.0
+        - 0.0
+        - 0.0
+        - 0.0
+        - 0.0
+        - 0.0
+        - 0.0
+        - 0.0
+        - 0.0
+        - 0.0
+        - 0.0
+        - 0.0
+        - 0.0
+        - 0.0
+        - 0.0
+        - 0.0
+        - 0.0
+        - 0.0
+        - 0.0
+        - 0.0
+        - 0.0
+        - 0.0
+        - 0.0
+        - 0.0
+        - 0.0
+        - 0.0
+        - 0.0
+        - 0.0
+        - 0.0
+        - 0.0
+        - 0.0
+        - 0.0
+        - 0.0
+        - 0.0
+        - 0.0
+        - 0.0
+        - 0.0
+        - 0.0
+        - 0.0
+        - 0.0
+        - 0.0
+    - name: last_action
+      overloads:
+        clip:
+          - -10.0
+          - 10.0
+        scale: null
+        history_length: 0
+        flatten_history_dim: true
+      extras:
+        description: The last input action to the environment. The name of the action term for which the action is required. If None, the entire action tensor is returned.
+        modifiers: null
+      mdp_type: Observation
+      full_path: isaaclab.envs.mdp.observations.last_action
+      shape:
+        - 12
+      dtype: torch.float32
+      observation_type: Action
+actions:
+  - name: joint_position_action
+    extras:
+      description: Joint action term that applies the processed actions to the articulation's joints as position commands.
+    mdp_type: Action
+    full_path: isaaclab.envs.mdp.actions.joint_actions.JointPositionAction
+    shape:
+      - 12
+    dtype: torch.float32
+    action_type: JointAction
+    joint_names:
+      - left_hip_pitch_joint
+      - right_hip_pitch_joint
+      - left_hip_roll_joint
+      - right_hip_roll_joint
+      - left_hip_yaw_joint
+      - right_hip_yaw_joint
+      - left_knee_joint
+      - right_knee_joint
+      - left_ankle_pitch_joint
+      - right_ankle_pitch_joint
+      - left_ankle_roll_joint
+      - right_ankle_roll_joint
+    scale:
+      - - 0.5475464463233948
+        - 0.5475464463233948
+        - 0.3506614565849304
+        - 0.3506614565849304
+        - 0.5475464463233948
+        - 0.5475464463233948
+        - 0.3506614565849304
+        - 0.3506614565849304
+        - 0.4385773241519928
+        - 0.4385773241519928
+        - 0.4385773241519928
+        - 0.4385773241519928
+    offset:
+      - -0.10000000149011612
+      - -0.10000000149011612
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.30000001192092896
+      - 0.30000001192092896
+      - -0.20000000298023224
+      - -0.20000000298023224
+      - 0.0
+      - 0.0
+    clip:
+      - - -6.0
+        - 6.0
+      - - -6.0
+        - 6.0
+      - - -6.0
+        - 6.0
+      - - -6.0
+        - 6.0
+      - - -6.0
+        - 6.0
+      - - -6.0
+        - 6.0
+      - - -6.0
+        - 6.0
+      - - -6.0
+        - 6.0
+      - - -6.0
+        - 6.0
+      - - -6.0
+        - 6.0
+      - - -6.0
+        - 6.0
+      - - -6.0
+        - 6.0
+articulations:
+  robot:
+    joint_names:
+      - left_hip_pitch_joint
+      - right_hip_pitch_joint
+      - waist_yaw_joint
+      - left_hip_roll_joint
+      - right_hip_roll_joint
+      - waist_roll_joint
+      - left_hip_yaw_joint
+      - right_hip_yaw_joint
+      - waist_pitch_joint
+      - left_knee_joint
+      - right_knee_joint
+      - left_shoulder_pitch_joint
+      - right_shoulder_pitch_joint
+      - left_ankle_pitch_joint
+      - right_ankle_pitch_joint
+      - left_shoulder_roll_joint
+      - right_shoulder_roll_joint
+      - left_ankle_roll_joint
+      - right_ankle_roll_joint
+      - left_shoulder_yaw_joint
+      - right_shoulder_yaw_joint
+      - left_elbow_joint
+      - right_elbow_joint
+      - left_wrist_roll_joint
+      - right_wrist_roll_joint
+      - left_wrist_pitch_joint
+      - right_wrist_pitch_joint
+      - left_wrist_yaw_joint
+      - right_wrist_yaw_joint
+      - left_hand_index_0_joint
+      - left_hand_middle_0_joint
+      - left_hand_thumb_0_joint
+      - right_hand_index_0_joint
+      - right_hand_middle_0_joint
+      - right_hand_thumb_0_joint
+      - left_hand_index_1_joint
+      - left_hand_middle_1_joint
+      - left_hand_thumb_1_joint
+      - right_hand_index_1_joint
+      - right_hand_middle_1_joint
+      - right_hand_thumb_1_joint
+      - left_hand_thumb_2_joint
+      - right_hand_thumb_2_joint
+    default_joint_pos:
+      - -0.10000000149011612
+      - -0.10000000149011612
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.30000001192092896
+      - 0.30000001192092896
+      - 0.0
+      - 0.0
+      - -0.20000000298023224
+      - -0.20000000298023224
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+    default_joint_vel:
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+    default_joint_pos_limits:
+      - - -2.5306997299194336
+        - 2.8797998428344727
+      - - -2.5306997299194336
+        - 2.8797998428344727
+      - - -2.618000030517578
+        - 2.618000030517578
+      - - -0.5235999226570129
+        - 2.967099666595459
+      - - -2.967099666595459
+        - 0.5235999226570129
+      - - -0.5199999213218689
+        - 0.5199999213218689
+      - - -2.7576000690460205
+        - 2.7576000690460205
+      - - -2.7576000690460205
+        - 2.7576000690460205
+      - - -0.5199999213218689
+        - 0.5199999213218689
+      - - -0.08726699650287628
+        - 2.8797998428344727
+      - - -0.08726699650287628
+        - 2.8797998428344727
+      - - -3.0891997814178467
+        - 2.6703999042510986
+      - - -3.0891997814178467
+        - 2.6703999042510986
+      - - -0.8726699352264404
+        - 0.5235999226570129
+      - - -0.8726699352264404
+        - 0.5235999226570129
+      - - -1.5881999731063843
+        - 2.251499652862549
+      - - -2.251499652862549
+        - 1.5881999731063843
+      - - -0.26179996132850647
+        - 0.26179996132850647
+      - - -0.26179996132850647
+        - 0.26179996132850647
+      - - -2.618000030517578
+        - 2.618000030517578
+      - - -2.618000030517578
+        - 2.618000030517578
+      - - -1.0471998453140259
+        - 2.0943996906280518
+      - - -1.0471998453140259
+        - 2.0943996906280518
+      - - -1.972221851348877
+        - 1.972221851348877
+      - - -1.972221851348877
+        - 1.972221851348877
+      - - -1.6144295930862427
+        - 1.6144295930862427
+      - - -1.6144295930862427
+        - 1.6144295930862427
+      - - -1.6144295930862427
+        - 1.6144295930862427
+      - - -1.6144295930862427
+        - 1.6144295930862427
+      - - -1.5707963705062866
+        - 0.0
+      - - -1.5707963705062866
+        - 0.0
+      - - -1.0471975803375244
+        - 1.0471975803375244
+      - - 0.0
+        - 1.5707963705062866
+      - - 0.0
+        - 1.5707963705062866
+      - - -1.0471975803375244
+        - 1.0471975803375244
+      - - -1.7453291416168213
+        - 0.0
+      - - -1.7453291416168213
+        - 0.0
+      - - -0.7243116497993469
+        - 1.0471975803375244
+      - - 0.0
+        - 1.7453291416168213
+      - - 0.0
+        - 1.7453291416168213
+      - - -1.0471975803375244
+        - 0.7243116497993469
+      - - 0.0
+        - 1.7453291416168213
+      - - -1.7453291416168213
+        - 0.0
+    default_joint_damping:
+      - 2.557889699935913
+      - 2.557889699935913
+      - 5.0
+      - 6.308801651000977
+      - 6.308801651000977
+      - 5.0
+      - 2.557889699935913
+      - 2.557889699935913
+      - 5.0
+      - 6.308801651000977
+      - 6.308801651000977
+      - 2.0
+      - 2.0
+      - 1.8144457340240479
+      - 1.8144457340240479
+      - 1.0
+      - 1.0
+      - 1.8144457340240479
+      - 1.8144457340240479
+      - 0.4000000059604645
+      - 0.4000000059604645
+      - 1.0
+      - 1.0
+      - 0.20000000298023224
+      - 0.20000000298023224
+      - 0.20000000298023224
+      - 0.20000000298023224
+      - 0.20000000298023224
+      - 0.20000000298023224
+      - 0.026150060817599297
+      - 0.026104284450411797
+      - 0.00929284282028675
+      - 0.026150071993470192
+      - 0.026104293763637543
+      - 0.0092928446829319
+      - 0.0022244243882596493
+      - 0.0022244276478886604
+      - 0.00737222284078598
+      - 0.0022244243882596493
+      - 0.002224427880719304
+      - 0.007372223772108555
+      - 0.002224378054961562
+      - 0.002224378287792206
+    default_joint_stiffness:
+      - 40.179237365722656
+      - 40.179237365722656
+      - 300.0
+      - 99.09842681884766
+      - 99.09842681884766
+      - 300.0
+      - 40.179237365722656
+      - 40.179237365722656
+      - 300.0
+      - 99.09842681884766
+      - 99.09842681884766
+      - 90.0
+      - 90.0
+      - 28.501245498657227
+      - 28.501245498657227
+      - 60.0
+      - 60.0
+      - 28.501245498657227
+      - 28.501245498657227
+      - 20.0
+      - 20.0
+      - 60.0
+      - 60.0
+      - 4.0
+      - 4.0
+      - 4.0
+      - 4.0
+      - 4.0
+      - 4.0
+      - 65.37516021728516
+      - 65.2607192993164
+      - 23.232107162475586
+      - 65.37517547607422
+      - 65.26073455810547
+      - 23.23211097717285
+      - 5.561060905456543
+      - 5.561069011688232
+      - 18.430557250976562
+      - 5.561060905456543
+      - 5.561069488525391
+      - 18.430561065673828
+      - 5.5609450340271
+      - 5.560945987701416
+    default_joint_friction:
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+    default_joint_armature:
+      - 0.010177520103752613
+      - 0.010177520103752613
+      - 0.029999999329447746
+      - 0.025101924315094948
+      - 0.025101924315094948
+      - 0.029999999329447746
+      - 0.010177520103752613
+      - 0.010177520103752613
+      - 0.029999999329447746
+      - 0.025101924315094948
+      - 0.025101924315094948
+      - 0.029999999329447746
+      - 0.029999999329447746
+      - 0.007219450082629919
+      - 0.007219450082629919
+      - 0.029999999329447746
+      - 0.029999999329447746
+      - 0.007219450082629919
+      - 0.007219450082629919
+      - 0.029999999329447746
+      - 0.029999999329447746
+      - 0.029999999329447746
+      - 0.029999999329447746
+      - 0.029999999329447746
+      - 0.029999999329447746
+      - 0.029999999329447746
+      - 0.029999999329447746
+      - 0.029999999329447746
+      - 0.029999999329447746
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+scene:
+  physics_dt: 0.005
+  dt: 0.02
+  decimation: 4

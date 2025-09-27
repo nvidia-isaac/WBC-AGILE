@@ -1,0 +1,60 @@
+# Explicit schedule example
+# Demonstrates using explicit time-based schedule instead of sweep
+# Useful for complex, non-uniform command sequences
+evaluation:
+  task_name: "Velocity-Height-G1-Dev-v0"
+  num_envs: 1
+  episode_length_s: 30.0
+  num_episodes: 1
+  environments:
+    - env_ids: [0]
+      name: "complex_maneuver"
+      schedule:
+        # Stand still for 5 seconds
+        - time: 0.0
+          commands:
+            base_velocity:
+              lin_vel_x: 0.0
+              lin_vel_y: 0.0
+              ang_vel_z: 0.0
+              base_height: 0.70
+        # Walk forward for 5 seconds
+        - time: 5.0
+          commands:
+            base_velocity:
+              lin_vel_x: 0.5
+              lin_vel_y: 0.0
+              ang_vel_z: 0.0
+              base_height: 0.70
+        # Turn left while walking for 5 seconds
+        - time: 10.0
+          commands:
+            base_velocity:
+              lin_vel_x: 0.5
+              lin_vel_y: 0.0
+              ang_vel_z: 0.5
+              base_height: 0.70
+        # Strafe right for 5 seconds
+        - time: 15.0
+          commands:
+            base_velocity:
+              lin_vel_x: 0.0
+              lin_vel_y: 0.5
+              ang_vel_z: 0.0
+              base_height: 0.70
+        # Walk backward while turning for 5 seconds
+        - time: 20.0
+          commands:
+            base_velocity:
+              lin_vel_x: -0.5
+              lin_vel_y: 0.0
+              ang_vel_z: -0.5
+              base_height: 0.70
+        # Return to standing
+        - time: 25.0
+          commands:
+            base_velocity:
+              lin_vel_x: 0.0
+              lin_vel_y: 0.0
+              ang_vel_z: 0.0
+              base_height: 0.70
