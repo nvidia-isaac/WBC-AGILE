@@ -1,0 +1,148 @@
+[build-system]
+requires = ["setuptools", "toml"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agile"
+version = "0.1.0"
+description = "Adaptive, model-guided policy for whole-body loco-manipulation"
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [
+    {name = "NVIDIA Corporation", email = "example@nvidia.com"}
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+# Dependencies are managed in requirements/ directory
+# This list is for pip install agile[all] compatibility
+dependencies = [
+    # Core dependencies (requirements-core.txt)
+    "tensordict==0.8.3",
+    "wandb==0.22.2",
+    "protobuf==3.20.3",
+    "tqdm>=4.64.0",
+    "numpy>=1.23.0",
+    "scipy>=1.9.0",
+    "pyyaml>=6.0",
+    "gym>=0.21.0",
+    # Visualization dependencies (requirements-viz.txt)
+    "matplotlib==3.6.0",
+    "seaborn==0.13.2",
+    "plotly==5.0.0",
+    "pandas==2.3.1",
+    "beautifulsoup4==4.14.2",
+    "jinja2==3.0.0",
+    # Extra dependencies (requirements-extras.txt)
+    "datasets==2.19.0",
+    "dearpygui==2.1.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "mypy>=1.0.0",
+    "types-pyyaml",
+    "types-requests",
+    "types-setuptools",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["agile*", "workflow*", "wandb*"]
+namespaces = true
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+exclude = [
+    "docs/*",
+    "logs/*",
+    "third_party/*",
+    "agile/algorithms/rsl_rl/*"
+]
+
+[tool.ruff.lint]
+select = [
+    "E",  # pycodestyle errors
+    "W",  # pycodestyle warnings
+    "F",  # pyflakes
+    "I",  # isort
+    "B",  # flake8-bugbear
+    "C4", # flake8-comprehensions
+    "UP", # pyupgrade
+]
+ignore = [
+    "E501",  # line too long, handled by formatter
+    "B008",  # do not perform function calls in argument defaults
+    "C901",  # too complex
+]
+
+# Isaac Sim scripts require specific import order for AppLauncher initialization
+[tool.ruff.lint.per-file-ignores]
+"scripts/*.py" = ["E402"]  # Allow module level imports not at top for Isaac Sim scripts
+"scripts/**/*.py" = ["E402"]  # Allow module level imports not at top for Isaac Sim scripts
+
+[tool.ruff.lint.isort]
+force-single-line = false
+known-first-party = ["agile"]
+known-third-party = [
+    "omni.isaac.core",
+    "omni.replicator.isaac",
+    "omni.replicator.core",
+    "pxr",
+    "omni.kit",
+    "warp",
+    "carb",
+    "wandb",
+]
+section-order = [
+    "future",
+    "standard-library",
+    "third-party",
+    "isaaclab",
+    "first-party",
+    "local-folder",
+]
+
+[tool.ruff.lint.isort.sections]
+"isaaclab" = ["isaaclab", "isaaclab_tasks", "isaaclab_assets"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "auto"
+
+# Pylint config - uncomment if you re-enable pylint in pre-commit
+# [tool.pylint.messages_control]
+# disable = [
+#     "C0114",  # missing-module-docstring
+#     "C0115",  # missing-class-docstring
+#     "C0116",  # missing-function-docstring
+#     "R0903",  # too-few-public-methods
+#     "R0913",  # too-many-arguments
+# ]
+
+# MyPy config - currently disabled due to 429 type errors
+# Gradually re-enable by fixing types in specific modules
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true  # Too strict for current codebase
+ignore_missing_imports = true
+explicit_package_bases = true
+
+
+# Ignore MISSING assignment errors in config files
+[[tool.mypy.overrides]]
+module = [
+    "agile.rl_env.mdp.terrains.hf_terrains_cfg",
+    "agile.rl_env.mdp.commands.commands_cfg",
+    "agile.rl_env.mdp.actions.actions_cfg"
+]
+disable_error_code = ["assignment"]

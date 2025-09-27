@@ -1,0 +1,45 @@
+method: bayes
+entity: YOUR_WANDB_ENTITY # Replace with your WandB username
+metric:
+  name: Metrics/base_velocity/error_vel_xy
+  goal: minimize
+command:
+  - python # Make sure to use the correct Python interpreter
+  - scripts/wandb_sweep/train_wrapper.py
+  - --num_envs
+  - 4096
+  - --task
+  - Velocity-T1-v0 # Replace with your task name
+  - --logger
+  - wandb
+  - --headless
+parameters:
+  # Agent parameters
+  agent.algorithm.learning_rate:
+    min: 1.0e-4
+    max: 1.0e-3
+    distribution: log_uniform_values
+  agent.seed:
+    min: 0
+    max: 10000
+  # Environment parameters
+  env.rewards.track_lin_vel_xy_exp.weight:
+    min: 1.0
+    max: 10.0
+    distribution: uniform
+  # Scaled-dictionary parameters
+  p_gain_leg:
+    distribution: uniform
+    min: 0.5
+    max: 2.0
+    p_gain_leg_cli_path:
+      value: env.scene.robot.actuators.legs.stiffness
+    p_gain_leg_base_dict:
+      value: |
+        {
+          ".*_hip_yaw_joint": 100.0,
+          ".*_hip_roll_joint": 100.0,
+          ".*_hip_pitch_joint": 100.0,
+          ".*_knee_joint": 200.0,
+          "waist.*": 200.0
+        }

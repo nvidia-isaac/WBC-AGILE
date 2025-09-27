@@ -1,0 +1,84 @@
+# Copyright (c) 2025, NVIDIA CORPORATION. All rights reserved.
+#
+# NVIDIA CORPORATION and its licensors retain all intellectual property
+# and proprietary rights in and to this software, related documentation
+# and any modifications thereto. Any use, reproduction, disclosure or
+# distribution of this software and related documentation without an express
+# license agreement from NVIDIA CORPORATION is strictly prohibited.
+# Exclude third_party and rsl_rl directories from all hooks
+exclude: '^(third_party|agile/algorithms/rsl_rl)/'
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: check-json
+      - id: check-xml
+      - id: check-ast
+      - id: end-of-file-fixer
+      - id: pretty-format-json
+        args: ['--autofix']
+      - id: trailing-whitespace
+      - id: check-yaml
+      - id: check-added-large-files
+      - id: check-merge-conflict
+      - id: detect-private-key
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.11.13
+    hooks:
+      - id: ruff
+        # Auto-fix mode for local development convenience
+        args: [--fix]
+      - id: ruff-format
+        # Auto-format mode for local development convenience
+      # Separate ruff check for unused arguments - only on mdp folder
+      - id: ruff
+        name: ruff-unused-args
+        # Only check unused arguments in the mdp folder
+        files: ^agile/rl_env/mdp/
+        args: [--select=ARG, --fix]
+  - repo: https://github.com/google/yamlfmt
+    rev: v0.17.0
+    hooks:
+      - id: yamlfmt
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.16.0
+    hooks:
+      - id: mypy
+        # Only check the mdp folder
+        files: ^agile/rl_env/mdp/
+        additional_dependencies:
+          - types-pyyaml
+          - types-requests
+          - types-setuptools
+        args: [--ignore-missing-imports, --explicit-package-bases, --follow-imports=skip, --disable-error-code=has-type]
+  - repo: local
+    # Add unit tests as a pre-commit hook that only runs in manual mode
+    # To run it manually: `pre-commit run unit-tests --hook-stage manual`
+
+    hooks:
+      - id: unit-tests
+        name: Run Unit Tests
+        entry: bash tests/run_unit_tests.sh
+        language: system
+        pass_filenames: false
+        # Set to true if you want it to run regardless of file changes
+        always_run: false
+        # Only run when files matching this pattern change
+        files: \.py$
+        # Only run in manual mode until we figure out why it's running when not needed
+        stages: [manual]
+  # Add E2E tests as a pre-commit hook that only runs in manual mode
+  # To run it manually: `pre-commit run e2e-tests --hook-stage manual`
+  - repo: local
+    hooks:
+      - id: e2e-tests
+        name: Run E2E Tests in Docker
+        entry: bash tests/test_e2e_ci_locally.sh
+        language: system
+        pass_filenames: false
+        # Set to true if you want it to run regardless of file changes
+        always_run: false
+        # Only run when files matching this pattern change
+        files: \.py$
+        # Only run when explicitly requested
+        stages: [manual]

@@ -1,0 +1,124 @@
+# Copyright (c) 2021-2025, ETH Zurich and NVIDIA CORPORATION
+# All rights reserved.
+#
+# SPDX-License-Identifier: BSD-3-Clause
+
+# SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+from __future__ import annotations
+
+import warnings
+
+from rsl_rl.modules import ActorCritic
+from rsl_rl.networks import Memory
+from rsl_rl.utils import resolve_nn_activation
+from tensordict.tensordict import TensorDict
+import torch
+
+
+def flatten_dict(td: TensorDict) -> torch.Tensor:
+    return torch.cat([td[key].flatten(td.batch_dims) for key in td.keys()], dim=-1)
+
+
+class ActorCriticRecurrent(ActorCritic):
+    is_recurrent = True
+
+    def __init__(
+        self,
+        num_actor_obs,
+        num_critic_obs,
+        num_actions,
+        actor_hidden_dims=[256, 256, 256],
+        critic_hidden_dims=[256, 256, 256],
+        activation="elu",
+        rnn_type="gru",
+        rnn_hidden_dim=256,
+        rnn_num_layers=1,
+        init_noise_std=1.0,
+        **kwargs,
+    ):
+        if "rnn_hidden_size" in kwargs:
+            warnings.warn(
+                "The argument `rnn_hidden_size` is deprecated and will be removed in a future version. "
+                "Please use `rnn_hidden_dim` instead.",
+                DeprecationWarning,
+            )
+            if (
+                rnn_hidden_dim == 256
+            ):  # Only override if the new argument is at its default
+                rnn_hidden_dim = kwargs.pop("rnn_hidden_size")
+        if kwargs:
+            print(
+                "ActorCriticRecurrent.__init__ got unexpected arguments, which will be ignored: "
+                + str(kwargs.keys()),
+            )
+
+        super().__init__(
+            num_actor_obs=rnn_hidden_dim,
+            num_critic_obs=rnn_hidden_dim,
+            num_actions=num_actions,
+            actor_hidden_dims=actor_hidden_dims,
+            critic_hidden_dims=critic_hidden_dims,
+            activation=activation,
+            init_noise_std=init_noise_std,
+        )
+
+        activation = resolve_nn_activation(activation)
+
+        is_tensor_dict = isinstance(num_actor_obs, TensorDict)
+        if is_tensor_dict:
+            num_actor_obs = flatten_dict(num_actor_obs).shape[-1]
+            num_critic_obs = flatten_dict(num_critic_obs).shape[-1]
+            self.preprocess_obs = flatten_dict
+        else:
+            self.preprocess_obs = torch.nn.Identity()
+
+        self.memory_a = Memory(
+            num_actor_obs,
+            type=rnn_type,
+            num_layers=rnn_num_layers,
+            hidden_size=rnn_hidden_dim,
+        )
+        self.memory_c = Memory(
+            num_critic_obs,
+            type=rnn_type,
+            num_layers=rnn_num_layers,
+            hidden_size=rnn_hidden_dim,
+        )
+
+        print(f"Actor RNN: {self.memory_a}")
+        print(f"Critic RNN: {self.memory_c}")
+
+    def reset(self, dones=None):
+        self.memory_a.reset(dones)
+        self.memory_c.reset(dones)
+
+    def act(self, observations, masks=None, hidden_states=None):
+        input_a = self.memory_a(self.preprocess_obs(observations), masks, hidden_states)
+        return super().act(input_a.squeeze(0))
+
+    def act_inference(self, observations):
+        input_a = self.memory_a(self.preprocess_obs(observations))
+        return super().act_inference(input_a.squeeze(0))
+
+    def evaluate(self, critic_observations, masks=None, hidden_states=None):
+        input_c = self.memory_c(
+            self.preprocess_obs(critic_observations), masks, hidden_states
+        )
+        return super().evaluate(input_c.squeeze(0))
+
+    def get_hidden_states(self):
+        return self.memory_a.hidden_states, self.memory_c.hidden_states
