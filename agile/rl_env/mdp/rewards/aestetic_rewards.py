@@ -405,19 +405,21 @@ def equal_foot_force_if_null_cmd(env: ManagerBasedRLEnv, command_name: str, sens
 
     If the full force is on one foot, the reward is 0.0.
     If the force is evenly distributed, the reward is 1.0.
-
-    Args:
-        env: The environment.
-        sensor_cfg: The configuration for the foot contact sensor.
     """
     command_term = env.command_manager.get_term(command_name)
     is_null_cmd = (command_term.command[:, :3] == 0).all(dim=1)
 
     contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
-    # compute the reward
     feet_z_forces = contact_sensor.data.net_forces_w[:, sensor_cfg.body_ids, 2].abs()
-    mean_force = feet_z_forces.mean(dim=1)
-    reward = 1.0 - torch.abs(mean_force.unsqueeze(1) - feet_z_forces).mean(dim=1) / (mean_force + 1e-6)
+
+    # Calculate variance-based measure of equality
+    total_force = feet_z_forces.sum(dim=1, keepdim=True)
+    # Avoid division by zero when robot is in the air
+    force_distribution = feet_z_forces / (total_force + 1e-6)
+    ideal_distribution = 1.0 / feet_z_forces.shape[1]  # Equal distribution
+
+    # Measure how close we are to ideal equal distribution
+    reward = 1.0 - torch.abs(force_distribution - ideal_distribution).mean(dim=1) / (2 * ideal_distribution)
 
     return reward * is_null_cmd.float()
 

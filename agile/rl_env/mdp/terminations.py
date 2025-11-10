@@ -63,7 +63,7 @@ def illegal_base_height(
 
 def link_distance(
     env: ManagerBasedRLEnv,
-    min_distance_threshold: float | None = None,
+    min_distance_threshold: float = 0.05,
     max_distance_threshold: float | None = None,
     asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),  # noqa: B008
 ) -> torch.Tensor:
@@ -71,40 +71,28 @@ def link_distance(
 
     Args:
         env: Environment instance
-        min_distance_threshold: Minimum distance threshold. Terminate if links closer than this. None to disable.
+        min_distance_threshold: Minimum distance threshold. Terminate if links closer than this.
         max_distance_threshold: Maximum distance threshold. Terminate if links farther than this. None to disable.
         asset_cfg: Asset configuration (must specify exactly 2 links)
 
     Returns:
         Boolean tensor indicating which environments should terminate
-
-    Raises:
-        AssertionError: If neither min_distance_threshold nor max_distance_threshold is specified.
-        AssertionError: If the number of links is not 2.
     """
     robot, _ = get_robot_cfg(env, asset_cfg)
     link_pos = robot.data.body_pos_w[:, asset_cfg.body_ids]
 
-    assert len(asset_cfg.body_ids) == 2, "Link distance is only supported for 2 links."
-    assert min_distance_threshold is not None or max_distance_threshold is not None, (
-        "At least one distance threshold must be specified"
-    )
-
-    distance = torch.norm(link_pos[:, 0] - link_pos[:, 1], dim=1)
+    assert len(asset_cfg.body_ids) == 2, "Link distance is only supported for 2 links"
+    link_distance = torch.norm(link_pos[:, 0] - link_pos[:, 1], dim=1)
 
     # Check minimum distance
-    if min_distance_threshold is not None:
-        too_close = distance < min_distance_threshold
-    else:
-        too_close = torch.zeros_like(distance, dtype=torch.bool)
+    too_close = link_distance < min_distance_threshold
 
     # Check maximum distance if specified
     if max_distance_threshold is not None:
-        too_far = distance > max_distance_threshold
-    else:
-        too_far = torch.zeros_like(distance, dtype=torch.bool)
+        too_far = link_distance > max_distance_threshold
+        return too_close | too_far
 
-    return too_close | too_far
+    return too_close
 
 
 class standing(ManagerTermBase):

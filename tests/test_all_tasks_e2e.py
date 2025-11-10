@@ -90,6 +90,10 @@ class TestAllTasks(unittest.TestCase):
             "Velocity-G1-History-v0",
             # G1 Robot - Locomotion with Height Map
             "Velocity-Height-G1-v0",
+            # G1 Robot - Locomotion with Height - Student Distillation - Recurrent
+            "Velocity-Height-G1-Distillation-Recurrent-v0",
+            # G1 Robot - Locomotion with Height - Student Distillation - History
+            "Velocity-Height-G1-Distillation-History-v0",
             # T1 Robot - Basic Locomotion
             "Velocity-T1-v0",
             # T1 Robot - Stand Up

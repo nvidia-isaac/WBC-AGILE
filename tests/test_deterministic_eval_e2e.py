@@ -55,7 +55,7 @@ class TestDeterministicEvalE2E(unittest.TestCase):
             / "data"
             / "policy"
             / "velocity_height_g1"
-            / "model_13500_height_sphere_increase_scale.pt"
+            / "unitree_g1_velocity_height_teacher.pt"
         )
 
         # Verify files exist

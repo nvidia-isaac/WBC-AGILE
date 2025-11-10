@@ -14,6 +14,8 @@
 # limitations under the License.
 
 
+from collections.abc import Sequence
+
 import torch
 
 from isaaclab.envs import ManagerBasedRLEnv
@@ -40,6 +42,78 @@ def relax_if_null_cmd(
     penalty = torch.where(is_null_cmd, torques, 0.0)
 
     return penalty
+
+
+class relax_if_null_cmd_exp(ManagerTermBase):
+    """Reward the agent for using low torques when the command is null.
+
+    Returns a reward (not penalty) that is higher when torques are lower.
+    The reward is 1.0 when torques are zero and decreases as torques increase.
+
+    This class caches the torque limits during initialization to avoid costly
+    CPU-to-GPU transfers during training.
+    """
+
+    def __init__(self, env: ManagerBasedRLEnv, cfg: RewardTermCfg) -> None:
+        """
+        Initialize the relaxation reward calculator.
+
+        Args:
+            env: Environment instance.
+            cfg: Configuration for the reward term.
+        """
+        super().__init__(cfg, env)
+
+        # Cache torque limits once during initialization (avoid CPU->GPU transfer every step)
+        asset_cfg = cfg.params.get("asset_cfg", SceneEntityCfg("robot"))
+        asset = env.scene[asset_cfg.name]
+        self.torque_limits = asset.root_physx_view.get_dof_max_forces()[:, asset_cfg.joint_ids].to(env.device)
+
+    def __call__(
+        self,
+        env: ManagerBasedRLEnv,
+        command_name: str,
+        std: float = 0.25,
+        asset_cfg: SceneEntityCfg | None = None,
+    ) -> torch.Tensor:
+        """
+        Calculate reward for low torque usage when command is null.
+
+        Args:
+            env: Environment instance.
+            command_name: Name of the command term to check.
+            std: Standard deviation for Gaussian reward shaping.
+            asset_cfg: Configuration for the robot asset. If None, uses default "robot".
+
+        Returns:
+            Reward tensor where 1.0 = no torque, 0.0 = high torque (only when cmd is null).
+        """
+        # Get robot configuration
+        if asset_cfg is None:
+            asset_cfg = SceneEntityCfg("robot")
+        asset = env.scene[asset_cfg.name]
+
+        # Check if command is null
+        command_term = env.command_manager.get_term(command_name)
+        is_null_cmd = (command_term.command[:, :3] == 0).all(dim=1)
+
+        # Calculate normalized torque magnitude using cached limits
+        torques = asset.data.applied_torque[:, asset_cfg.joint_ids]
+        normalized_torques = torques / (self.torque_limits + 1e-6)
+
+        # Compute RMS (root mean square) of normalized torques
+        # This gives us a single value representing overall torque usage
+        rms_norm_torque = torch.sqrt(torch.mean(torch.square(normalized_torques), dim=1))
+
+        # Convert to reward using Gaussian
+        reward = torch.exp(-((rms_norm_torque / std) ** 2))
+
+        # Only apply when command is null
+        return torch.where(is_null_cmd, reward, torch.zeros_like(reward))
+
+    def reset(self, env_ids: Sequence[int] | None = None) -> None:
+        """Reset is not needed for this term as torque limits don't change."""
+        pass
 
 
 def action_rate_l2(env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")) -> torch.Tensor:  # noqa: ARG001

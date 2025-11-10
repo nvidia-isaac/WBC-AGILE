@@ -37,24 +37,13 @@ def track_base_height_exp_smooth(env: ManagerBasedRLEnv, command_name: str, std:
 def track_lin_vel_xy_yaw_frame_exp_weighted(
     env: ManagerBasedRLEnv,
     command_name: str,
-    std_scale: float = 0.5,
-    std_offset: float = 0.05,
+    std: float = 0.2,
     asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
 ) -> torch.Tensor:
     """Reward tracking of linear velocity commands (xy axes) in the gravity aligned robot frame using exponential kernel.
 
-    The std of the exponential kernel is scaled by the commanded velocity magnitude to provide adaptive tolerance:
-    std = std_scale * |v_cmd| + std_offset
-
-    This design provides tighter tracking requirements for low velocities and more tolerance for high velocities,
-    improving tracking performance across the full velocity range.
-
-    Args:
-        env: The RL environment.
-        command_name: Name of the command term.
-        std_scale: Scaling factor for velocity-based std (k in std = k * |v_cmd| + e). Default is 0.5.
-        std_offset: Offset for velocity-based std (e in std = k * |v_cmd| + e). Default is 0.05.
-        asset_cfg: Scene entity configuration for the robot.
+    The tracking error is additionally weighted by the command velocity's magnitude. Higher commanded velocities
+    receive higher weight, encouraging accurate tracking especially at higher speeds.
     """
 
     # extract the used quantities (to enable type-hinting)
@@ -68,10 +57,50 @@ def track_lin_vel_xy_yaw_frame_exp_weighted(
 
     # Compute adaptive std based on commanded velocity magnitude
     cmd_vel_magnitude = torch.norm(vel_cmd, dim=1)
-    adaptive_std = std_scale * cmd_vel_magnitude + std_offset
+    # Define velocity bounds for scaling (assuming min=0.01
+    vel_min = 0.01
+    vel_max = torch.norm(torch.tensor([command_term.cfg.ranges.lin_vel_x[1], command_term.cfg.ranges.lin_vel_y[1]]))
 
-    # Return exponential reward with adaptive std
-    return torch.exp(-lin_vel_error / adaptive_std**2)
+    # Clamp magnitude to expected range
+    cmd_vel_magnitude_clamped = torch.clamp(cmd_vel_magnitude, vel_min, vel_max)
+
+    # Map direct relationship to weight range
+    # Using linear interpolation: higher commanded velocity -> higher weight
+    weight_min = 1.0
+    weight_max = 2.0
+
+    # Normalized direct mapping: high velocity -> high weight, low velocity -> low weight
+    normalized = (cmd_vel_magnitude_clamped - vel_min) / (vel_max - vel_min)
+    weight = weight_min + (weight_max - weight_min) * normalized
+
+    # Return weighted exponential reward
+    return weight * torch.exp(-lin_vel_error / std**2)
+
+
+def track_lin_vel_xy_yaw_frame_exp_aligned(
+    env: ManagerBasedRLEnv, std: float, command_name: str, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")
+) -> torch.Tensor:
+    """Reward tracking of linear velocity commands (xy axes) in the gravity aligned robot frame using exponential kernel.
+    The reward is scaled by the cosine similarity between the command and the velocity when the command is not null.
+    """
+    # extract the used quantities (to enable type-hinting)
+    asset = env.scene[asset_cfg.name]
+    vel_yaw = quat_apply_inverse(yaw_quat(asset.data.root_quat_w), asset.data.root_lin_vel_w[:, :3])[:, :2]
+    vel_cmd = env.command_manager.get_command(command_name)[:, :2]
+
+    cosine_similarity = torch.nn.functional.cosine_similarity(vel_cmd, vel_yaw, dim=1)
+
+    lin_vel_error = torch.sum(
+        torch.square(vel_cmd - vel_yaw),
+        dim=1,
+    )
+    is_null_cmd = (vel_cmd == 0).all(dim=1)
+
+    reward = torch.where(
+        ~is_null_cmd, torch.exp(-lin_vel_error / std**2) * cosine_similarity, torch.exp(-lin_vel_error / std**2)
+    )
+
+    return reward
 
 
 def vel_xy_in_threshold(
@@ -84,100 +113,6 @@ def vel_xy_in_threshold(
 
     lin_vel_error = torch.linalg.vector_norm(vel_cmd - vel_yaw, dim=1)
     return (lin_vel_error < threshold).float()
-
-
-def track_ang_vel_z_world_exp_weighted(
-    env: ManagerBasedRLEnv,
-    command_name: str,
-    std_scale: float = 0.5,
-    std_offset: float = 0.05,
-    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
-) -> torch.Tensor:
-    """Reward tracking of angular velocity commands (yaw) using exponential kernel with adaptive std.
-
-    The std of the exponential kernel is scaled by the commanded angular velocity magnitude:
-    std = std_scale * |ang_vel_cmd| + std_offset
-
-    This design provides tighter tracking requirements for low angular velocities and more tolerance
-    for high angular velocities, improving tracking performance across the full velocity range.
-
-    Args:
-        env: The RL environment.
-        command_name: Name of the command term.
-        std_scale: Scaling factor for velocity-based std (k in std = k * |ang_vel_cmd| + e). Default is 0.5.
-        std_offset: Offset for velocity-based std (e in std = k * |ang_vel_cmd| + e). Default is 0.05.
-        asset_cfg: Scene entity configuration for the robot.
-    """
-    # extract the used quantities (to enable type-hinting)
-    asset = env.scene[asset_cfg.name]
-    ang_vel_cmd = env.command_manager.get_command(command_name)[:, 2]
-    ang_vel_error = torch.square(ang_vel_cmd - asset.data.root_ang_vel_w[:, 2])
-
-    # Compute adaptive std based on commanded angular velocity magnitude
-    ang_vel_cmd_magnitude = torch.abs(ang_vel_cmd)
-    adaptive_std = std_scale * ang_vel_cmd_magnitude + std_offset
-
-    return torch.exp(-ang_vel_error / adaptive_std**2)
-
-
-def ang_vel_in_threshold(
-    env: ManagerBasedRLEnv, command_name: str, threshold: float, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")
-) -> torch.Tensor:
-    """Reward the agent for tracking angular velocity within threshold.
-
-    Args:
-        env: Environment instance
-        command_name: Name of the velocity command term
-        threshold: Maximum allowed error (rad/s)
-        asset_cfg: Asset configuration (uses root angular velocity)
-
-    Returns:
-        1.0 if angular velocity error is below threshold, 0.0 otherwise
-    """
-    asset = env.scene[asset_cfg.name]
-    # Use root angular velocity (world frame, z component)
-    ang_vel_z = asset.data.root_ang_vel_w[:, 2]
-    ang_vel_cmd = env.command_manager.get_command(command_name)[:, 2]
-
-    ang_vel_error = (ang_vel_z - ang_vel_cmd).abs()
-    return (ang_vel_error < threshold).float()
-
-
-def height_reached(
-    env: ManagerBasedRLEnv,
-    apply_stance_condition: bool = False,
-    height_reached_threshold: float = 0.02,
-    command_name: str = "base_velocity_height",
-    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),  # noqa: B008
-) -> torch.Tensor:
-    """Extra bonus reward for reaching the target height.
-
-    Args:
-        env: Environment instance.
-        apply_stance_condition: Whether to apply the reward only in stance mode.
-        command_name: Name of the command generator.
-        asset_cfg: Configuration for the robot asset.
-    """
-
-    # Get the robot asset from the scene
-    robot, _ = get_robot_cfg(env, asset_cfg)
-
-    # Get base height from the robot's root state
-    base_height = robot.data.root_pos_w[:, 2]
-
-    # Get the command from the command manager
-    command_term = env.command_manager.get_term(command_name)
-
-    # Compute height error
-    height_error = torch.abs(base_height - command_term.command[:, -1])
-
-    reward = torch.where(height_error <= height_reached_threshold, 1.0, 0.0)
-
-    if apply_stance_condition:
-        is_null_cmd = (command_term.command[:, :3] == 0).all(dim=1)
-        reward = reward * is_null_cmd.float()
-
-    return reward
 
 
 def track_base_height(

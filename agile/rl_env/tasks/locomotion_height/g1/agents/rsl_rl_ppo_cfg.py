@@ -33,15 +33,16 @@ from agile.rl_env.rsl_rl import (  # noqa: F401
 class G1VelocityHeightPpoRunnerCfg(RslRlOnPolicyRunnerCfg):
     seed = 42
     num_steps_per_env = 24
-    max_iterations = 100_000
+    max_iterations = 30_000
     save_interval = 250
     experiment_name = "velocity_height_g1_lower"
     run_name = "velocity_height_g1_lower"
     wandb_project = "Velocity-Height-G1-Lower"
     empirical_normalization = False
-    enable_entropy_coef_annealing = False
+    enable_entropy_coef_annealing = True
     entropy_coef_annealing_start_progress = 0.2
-    enable_entropy_coef_annealing_success_rate = 0.9
+    enable_entropy_coef_annealing_success_rate = 0.8
+    entropy_annealing_decay_rate = 0.9995
     policy = RslRlPpoActorCriticCfg(
         init_noise_std=1.0,
         actor_hidden_dims=[256, 256, 128],
@@ -86,7 +87,7 @@ class G1VelocityHeightDistillationRecurrentRunnerCfg(G1VelocityHeightPpoRunnerCf
     )
     policy = RslRlStudentTrainedTeacherCfg(
         class_name="StudentTrainedTeacherRecurrent",  # "StudentTrainedTeacher",
-        teacher_path="agile/data/policy/velocity_height_g1/model_13500_height_sphere_increase_scale.pt",
+        teacher_path="agile/data/policy/velocity_height_g1/unitree_g1_velocity_height_teacher.pt",
         student_hidden_dims=[256, 256, 128],
         activation="elu",
     )
@@ -115,7 +116,7 @@ class G1VelocityHeightDistillationHistoryRunnerCfg(G1VelocityHeightPpoRunnerCfg)
     )
     policy = RslRlStudentTrainedTeacherCfg(
         class_name="StudentTrainedTeacher",  # "StudentTrainedTeacher",
-        teacher_path="agile/data/policy/velocity_height_g1/model_13500_height_sphere_increase_scale.pt",
+        teacher_path="agile/data/policy/velocity_height_g1/unitree_g1_velocity_height_teacher.pt",
         student_hidden_dims=[512, 256, 128],
         activation="elu",
     )

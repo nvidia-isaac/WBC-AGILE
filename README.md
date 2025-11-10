@@ -196,6 +196,10 @@ python scripts/train.py \
     --log_project_name Velocity-T1-v0 \
     --run_name test
 ```
+
+> **💡 Experiment Reproducibility:** Training (including evaluation) automatically captures and logs lightweight git metadata (commit hash, branch, uncommitted changes, and diffs) to your experiment logs. When using wandb, this information is uploaded to your run for easy tracking and reproduction. This ensures you can always trace back the exact code state—including any staged or unstaged changes—used for any experiment, without storing the entire repository.
+
+
 </details>
 
 <details>

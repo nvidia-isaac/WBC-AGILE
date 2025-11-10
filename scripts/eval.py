@@ -127,6 +127,7 @@ simulation_app = app_launcher.app
 
 import gymnasium as gym
 import os
+import pickle
 import time
 import torch
 
@@ -215,6 +216,60 @@ def _apply_env_overrides(env_cfg, eval_config):
                 print(f"[INFO] Disabled events: {disabled_events}")
 
 
+def load_policy(resume_path, env, agent_cfg):
+    """Load policy from either TorchScript or regular checkpoint.
+
+    This function intelligently detects the checkpoint format and loads accordingly:
+    - TorchScript (.pt): Directly loads the exported policy (includes normalizer)
+    - Regular checkpoint (.pt): Loads through OnPolicyRunner (includes optimizer state, etc.)
+
+    Args:
+        resume_path: Path to the checkpoint file
+        env: The wrapped environment (RslRlVecEnvWrapper)
+        agent_cfg: Agent configuration (RslRlOnPolicyRunnerCfg)
+
+    Returns:
+        tuple: (policy, ppo_runner)
+            - policy: Callable policy for inference
+            - ppo_runner: OnPolicyRunner instance (None if TorchScript)
+    """
+    device = env.unwrapped.device
+
+    # Try loading as TorchScript first (exported policies)
+    try:
+        policy = torch.jit.load(resume_path, map_location=device)
+        policy.eval()
+        print(f"[INFO] Loaded TorchScript policy from: {resume_path}")
+        print("[INFO] TorchScript policies are self-contained (include normalizer)")
+        return policy, None
+
+    except (RuntimeError, AttributeError, pickle.UnpicklingError) as e:
+        # Not a valid TorchScript file, try regular checkpoint
+        print(f"[INFO] Not a TorchScript file (error: {type(e).__name__}), loading as regular checkpoint...")
+
+    # Load as regular checkpoint through OnPolicyRunner
+    try:
+        print(f"[INFO] Loading model checkpoint from: {resume_path}")
+        ppo_runner = OnPolicyRunner(
+            env,
+            agent_cfg.to_dict(),
+            log_dir=None,
+            device=agent_cfg.device,
+        )
+        ppo_runner.load(resume_path)
+
+        # Obtain the trained policy for inference
+        policy = ppo_runner.get_inference_policy(device=device)
+        print("[INFO] Successfully loaded regular checkpoint")
+        return policy, ppo_runner
+
+    except Exception as e:
+        raise RuntimeError(
+            f"Failed to load checkpoint from {resume_path}. "
+            f"Tried both TorchScript and regular checkpoint formats. Error: {e}"
+        ) from e
+
+
 def main():
     """Play with RSL-RL agent."""
     # parse configuration
@@ -281,38 +336,32 @@ def main():
     # wrap around environment for rsl-rl
     env = RslRlVecEnvWrapper(env)
 
-    print(f"[INFO]: Loading model checkpoint from: {resume_path}")
-    # load previously trained model
-    ppo_runner = OnPolicyRunner(
-        env,
-        agent_cfg.to_dict(),
-        log_dir=None,
-        device=agent_cfg.device,
-    )
-    ppo_runner.load(resume_path)
+    # Load policy (supports both TorchScript and regular checkpoints)
+    policy, ppo_runner = load_policy(resume_path, env, agent_cfg)
 
-    # obtain the trained policy for inference
-    policy = ppo_runner.get_inference_policy(device=env.unwrapped.device)
-
-    # export policy to onnx/jit (skip if it fails due to JIT compatibility issues)
-    try:
-        export_model_dir = os.path.join(os.path.dirname(resume_path), "exported")
-        export_policy_as_jit(
-            ppo_runner.alg.policy,
-            ppo_runner.obs_normalizer,
-            path=export_model_dir,
-            filename="policy.pt",
-        )
-        export_policy_as_onnx(
-            ppo_runner.alg.policy,
-            normalizer=ppo_runner.obs_normalizer,
-            path=export_model_dir,
-            filename="policy.onnx",
-        )
-        print("[INFO] Successfully exported policy to JIT and ONNX")
-    except Exception as e:
-        print(f"[WARNING] Failed to export policy (continuing evaluation anyway): {e}")
-        # This is not critical for evaluation, so we continue
+    # Export policy to onnx/jit if we loaded from a regular checkpoint
+    # (Skip if already TorchScript or if export fails)
+    if ppo_runner is not None:
+        try:
+            export_model_dir = os.path.join(os.path.dirname(resume_path), "exported")
+            export_policy_as_jit(
+                ppo_runner.alg.policy,
+                ppo_runner.obs_normalizer,
+                path=export_model_dir,
+                filename="policy.pt",
+            )
+            export_policy_as_onnx(
+                ppo_runner.alg.policy,
+                normalizer=ppo_runner.obs_normalizer,
+                path=export_model_dir,
+                filename="policy.onnx",
+            )
+            print("[INFO] Successfully exported policy to JIT and ONNX")
+        except Exception as e:
+            print(f"[WARNING] Failed to export policy (continuing evaluation anyway): {e}")
+            # This is not critical for evaluation, so we continue
+    else:
+        print("[INFO] Skipping export (policy already in TorchScript format)")
 
     # Get the control timestep (not physics timestep - accounts for decimation)
     dt = env.unwrapped.step_dt

@@ -19,7 +19,7 @@ from isaaclab.actuators import ImplicitActuatorCfg
 from isaaclab.assets import ArticulationCfg
 from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR
 
-from agile.rl_env.mdp.actuators.actuators_cfg import DelayedDCMotorCfg
+from agile.rl_env.mdp.actuators.actuators_cfg import DelayedDCMotorCfg, DelayedImplicitActuatorCfg
 
 MAX_DELAY_PHY_STEPS = 4
 MIN_DELAY_PHY_STEPS = 0
@@ -56,6 +56,8 @@ DEFAULT_PELVIS_HEIGHT = 0.72
 G1_29DOF_DELAYED_DC_MOTOR = ArticulationCfg(
     spawn=sim_utils.UsdFileCfg(
         usd_path=G1_USD_PATH,
+        # Disable hands to accelerate training.
+        variants={"Physics": "PhysX", "left_hand": "None", "right_hand": "None"},
         activate_contact_sensors=True,
         rigid_props=sim_utils.RigidBodyPropertiesCfg(
             disable_gravity=False,
@@ -248,6 +250,8 @@ DAMPING_4010 = 2.0 * DAMPING_RATIO * ARMATURE_4010 * NATURAL_FREQ
 G1_29DOF = ArticulationCfg(
     spawn=sim_utils.UsdFileCfg(
         usd_path=G1_USD_PATH,
+        # Disable hands to accelerate training.
+        variants={"Physics": "PhysX", "left_hand": "None", "right_hand": "None"},
         activate_contact_sensors=True,
         rigid_props=sim_utils.RigidBodyPropertiesCfg(
             disable_gravity=False,
@@ -273,7 +277,7 @@ G1_29DOF = ArticulationCfg(
         joint_vel={".*": 0.0},
     ),
     actuators={
-        "legs": ImplicitActuatorCfg(
+        "legs": DelayedImplicitActuatorCfg(
             joint_names_expr=[
                 ".*_hip_yaw_joint",
                 ".*_hip_roll_joint",
@@ -310,14 +314,18 @@ G1_29DOF = ArticulationCfg(
                 ".*_hip_yaw_joint": ARMATURE_7520_14,
                 ".*_knee_joint": ARMATURE_7520_22,
             },
+            min_delay=MIN_DELAY_PHY_STEPS,
+            max_delay=MAX_DELAY_PHY_STEPS,
         ),
-        "feet": ImplicitActuatorCfg(
+        "feet": DelayedImplicitActuatorCfg(
             effort_limit_sim=50.0,
             velocity_limit_sim=37.0,
             joint_names_expr=[".*_ankle_pitch_joint", ".*_ankle_roll_joint"],
             stiffness=2.0 * STIFFNESS_5020,
             damping=2.0 * DAMPING_5020,
             armature=2.0 * ARMATURE_5020,
+            min_delay=MIN_DELAY_PHY_STEPS,
+            max_delay=MAX_DELAY_PHY_STEPS,
         ),
         "waist": ImplicitActuatorCfg(
             joint_names_expr=[
