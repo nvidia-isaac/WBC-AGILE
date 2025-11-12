@@ -130,7 +130,6 @@ We recommend using the conda installation. Remember to checkout to the specific 
    ```bash
    # Ensure you're using version 2.3.0
    git checkout v2.3.0
-   export ISAACLAB_PATH=/path/to/isaac_lab
    ```
 </details>
 

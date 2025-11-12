@@ -506,6 +506,28 @@ def moving_if_standing(
     return penalty * is_standing
 
 
+def flat_body_orientation_exp(
+    env: ManagerBasedRLEnv, std: float, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")
+) -> torch.Tensor:
+    """Reward flat orientation using exponential kernel.
+
+    This is computed by rewarding small xy-components of the projected gravity vector.
+    Args:
+        std: std in rad
+        asset_cfg:
+    """
+    # extract the used quantities (to enable type-hinting)
+    asset: RigidObject = env.scene[asset_cfg.name]
+
+    body_quats = asset.data.body_link_quat_w[:, asset_cfg.body_ids]
+    gravity_vec_expanded = asset.data.GRAVITY_VEC_W.unsqueeze(1).expand(-1, len(asset_cfg.body_ids), -1)
+    projected_gravity = math_utils.quat_apply_inverse(body_quats, gravity_vec_expanded)
+    orientation_error = torch.sum(torch.square(projected_gravity[..., :2]), dim=-1)  # sum over x,y
+    orientation_error_per_env = torch.sum(orientation_error, dim=-1)  # sum over k bodies
+
+    return torch.exp(-orientation_error_per_env / std**2)
+
+
 def flat_orientation_if_null_cmd(
     env: ManagerBasedRLEnv,
     command_name: str,
