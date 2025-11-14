@@ -13,3 +13,4 @@ agile/data/policy/velocity_g1/unitree_g1_velocity_history.pt filter=lfs diff=lfs
 agile/data/policy/velocity_height_g1/unitree_g1_velocity_height_recurrent_student.pt filter=lfs diff=lfs merge=lfs -text
 agile/data/policy/velocity_t1/booster_t1_velocity_v0.pt filter=lfs diff=lfs merge=lfs -text
 agile/data/policy/velocity_height_g1/unitree_g1_velocity_height_teacher.pt filter=lfs diff=lfs merge=lfs -text
+docs/figures/separate_upper_lower_body_policy_diagram.png filter=lfs diff=lfs merge=lfs -text

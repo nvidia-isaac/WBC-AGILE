@@ -53,6 +53,12 @@ parser.add_argument(
     default=False,
     help="Run in real-time, if possible.",
 )
+parser.add_argument(
+    "--use_mirroring",
+    action="store_true",
+    default=False,
+    help="Mirror observations/actions for side-by-side visualization (supports G1 and T1).",
+)
 # append RSL-RL cli arguments
 cli_args.add_rsl_rl_args(parser)
 # append AppLauncher cli args
@@ -69,6 +75,7 @@ simulation_app = app_launcher.app
 
 import gymnasium as gym
 import os
+import pickle
 import time
 import torch
 
@@ -93,6 +100,7 @@ from isaaclab_tasks.utils import get_checkpoint_path, parse_env_cfg
 from isaaclab.terrains import TerrainImporterCfg
 import isaaclab.sim as sim_utils
 from isaaclab.envs import ManagerBasedRLEnvCfg
+from agile.rl_env.mdp.symmetry import lr_mirror_G1, lr_mirror_T1
 
 
 def prepare_env_for_playing(env_cfg: ManagerBasedRLEnvCfg) -> ManagerBasedRLEnvCfg:
@@ -124,6 +132,39 @@ def prepare_env_for_playing(env_cfg: ManagerBasedRLEnvCfg) -> ManagerBasedRLEnvC
         del env_cfg.actions.random_pos
 
     return env_cfg
+
+
+def load_policy(resume_path, env, agent_cfg):
+    """Load policy from either TorchScript or regular checkpoint."""
+
+    device = env.unwrapped.device
+
+    try:
+        policy = torch.jit.load(resume_path, map_location=device)
+        policy.eval()
+        print(f"[INFO] Loaded TorchScript policy from: {resume_path}")
+        print("[INFO] TorchScript policies are self-contained (include normalizer)")
+        return policy, None
+    except (RuntimeError, AttributeError, pickle.UnpicklingError) as e:
+        print(f"[INFO] Not a TorchScript file (error: {type(e).__name__}), loading as regular checkpoint...")
+
+    try:
+        print(f"[INFO] Loading model checkpoint from: {resume_path}")
+        ppo_runner = OnPolicyRunner(
+            env,
+            agent_cfg.to_dict(),
+            log_dir=None,
+            device=agent_cfg.device,
+        )
+        ppo_runner.load(resume_path)
+        policy = ppo_runner.get_inference_policy(device=device)
+        print("[INFO] Successfully loaded regular checkpoint")
+        return policy, ppo_runner
+    except Exception as e:  # noqa: BLE001
+        raise RuntimeError(
+            f"Failed to load checkpoint from {resume_path}. "
+            f"Tried both TorchScript and regular checkpoint formats. Error: {e}"
+        ) from e
 
 
 def main():
@@ -181,49 +222,77 @@ def main():
     # wrap around environment for rsl-rl
     env = RslRlVecEnvWrapper(env)
 
-    print(f"[INFO]: Loading model checkpoint from: {resume_path}")
-    # load previously trained model
-    ppo_runner = OnPolicyRunner(env, agent_cfg.to_dict(), log_dir=None, device=agent_cfg.device)
-    ppo_runner.load(resume_path)
+    mirror_fn = None
+    if args_cli.use_mirroring:
+        if not args_cli.task:
+            print("[WARNING] --use_mirroring requires --task to infer the robot type. Disabling flag.")
+        else:
+            task_lower = args_cli.task.lower()
+            if "t1" in task_lower:
+                mirror_fn = lr_mirror_T1
+            elif "g1" in task_lower:
+                mirror_fn = lr_mirror_G1
+            else:
+                print("[WARNING] --use_mirroring currently supports only G1 or T1 tasks. Disabling flag.")
 
-    # obtain the trained policy for inference
-    policy = ppo_runner.get_inference_policy(device=env.unwrapped.device)
+        if mirror_fn and not hasattr(env.unwrapped, "action_manager"):
+            print("[WARNING] Environment does not expose an action_manager. Disabling --use_mirroring.")
+            mirror_fn = None
 
-    # export policy to onnx/jit
-    export_model_dir = os.path.join(os.path.dirname(resume_path), "exported")
-    export_policy_as_jit(
-        ppo_runner.alg.policy,
-        ppo_runner.obs_normalizer,
-        path=export_model_dir,
-        filename="policy.pt",
-    )
-    export_policy_as_onnx(
-        ppo_runner.alg.policy,
-        normalizer=ppo_runner.obs_normalizer,
-        path=export_model_dir,
-        filename="policy.onnx",
-    )
+    use_mirroring = mirror_fn is not None
+
+    policy, ppo_runner = load_policy(resume_path, env, agent_cfg)
+
+    if ppo_runner is not None:
+        export_model_dir = os.path.join(os.path.dirname(resume_path), "exported")
+        export_policy_as_jit(
+            ppo_runner.alg.policy,
+            ppo_runner.obs_normalizer,
+            path=export_model_dir,
+            filename="policy.pt",
+        )
+        export_policy_as_onnx(
+            ppo_runner.alg.policy,
+            normalizer=ppo_runner.obs_normalizer,
+            path=export_model_dir,
+            filename="policy.onnx",
+        )
+    else:
+        print("[INFO] Skipping export (policy already in TorchScript format)")
 
     dt = env.unwrapped.physics_dt
-
-    use_mirroring = False
 
     # reset environment
     obs, _ = env.get_observations()
     timestep = 0
+
+    # Check if we need to convert TensorDict to tensor for exported policies
+    # Note: We check if it's a dict-like object, not just if it has "values" attribute
+    # (regular tensors have .values() method for sparse tensors, which would cause false positives)
+    is_tensordict_obs = isinstance(obs, dict) or (
+        hasattr(obs, "values") and callable(getattr(obs, "values", None)) and not isinstance(obs, torch.Tensor)
+    )
+
     # simulate environment
     while simulation_app.is_running():
         start_time = time.time()
         # run everything in inference mode
         with torch.inference_mode():
+            # Convert TensorDict to tensor if needed (for exported TorchScript policies)
+            if is_tensordict_obs and ppo_runner is None:
+                # Flatten TensorDict to tensor for exported policy
+                obs_tensor = torch.cat([v.flatten(start_dim=1) for v in obs.values()], dim=-1)
+            else:
+                obs_tensor = obs
+
             # agent stepping
             if use_mirroring:
-                augmented_obs, _ = lr_mirror_T1(env, obs, None, "policy")
+                augmented_obs, _ = mirror_fn(env, obs_tensor, None, "policy")
                 mirrored_actions = policy(augmented_obs[env.num_envs :])
-                _, augmented_actions = lr_mirror_T1(env, None, mirrored_actions, "policy")
+                _, augmented_actions = mirror_fn(env, None, mirrored_actions, "policy")
                 actions = augmented_actions[env.num_envs :]
             else:
-                actions = policy(obs)
+                actions = policy(obs_tensor)
             # env stepping
             obs, _, _, _ = env.step(actions)
 

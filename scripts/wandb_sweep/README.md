@@ -1,21 +1,21 @@
-# WandB Sweep System for Isaac Lab
+# Weights & Biases (W&B) Sweep System for Isaac Lab
 
-This directory contains a WandB (Weights & Biases) [sweep](https://docs.wandb.ai/models/sweeps) system for hyperparameter optimization in Isaac Lab.
+This directory contains a Weights & Biases (W&B) [sweep](https://docs.wandb.ai/models/sweeps) system for hyperparameter optimization in Isaac Lab.
 
 
 ## Key Features
 
-- **WandB Sweep Integration**: Sweeping and logging with WandB
+- **W&B Sweep Integration**: Sweeping and logging with W&B
 - **Scaled-Dictionary Parameters**: Special support for scaling complex robot configurations (actuator gains, effort limits, etc.)
 - **Multi-Machine Support**: Run agents across multiple machines/GPUs that coordinate through WandB via sweep ID.
 
 ## Files Overview
 
-- `sweep.yaml` - Main sweep configuration file. To define once
-- `train_wrapper.py` - Wrapper script that processes sweep parameters
-- `init_sweep.py` - Initialize a new sweep. To run once
-- `run_sweep.py` - Start sweep agents. To run as many times as desired on different machines
-- `sweep_ids.json` - Stores sweep IDs for reuse across machines
+- `sweep.yaml` - Main sweep configuration file. Define once.
+- `train_wrapper.py` - Wrapper script that processes sweep parameters.
+- `init_sweep.py` - Initialize a new sweep. Run once.
+- `run_sweep.py` - Start sweep agents. Run as many times as desired on different machines.
+- `sweep_ids.json` - Stores sweep IDs for reuse across machines.
 
 ## Quick Start
 
@@ -70,7 +70,7 @@ parameters:
 ```bash
 python scripts/wandb_sweep/init_sweep.py --project_name my_robot_optimization
 ```
-This stores the newly generated sweep id in the `sweep_ids.json` file.
+This stores the newly generated sweep ID in the `sweep_ids.json` file.
 
 ### 3. Start Sweep Agents
 
@@ -154,4 +154,4 @@ python scripts/wandb_sweep/run_sweep.py --project_name PROJECT_NAME --agent_coun
 ```
 
 ### Monitor Progress
-View results in WandB dashboard: `https://wandb.ai/ENTITY/PROJECT_NAME`
+View results in the W&B dashboard: `https://wandb.ai/ENTITY/PROJECT_NAME`
