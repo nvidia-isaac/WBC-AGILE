@@ -1,11 +1,11 @@
 # Scripts
 
-This directory contains all scripts for training, evaluation, and system management for the Agile project.
+This directory contains all scripts for training, evaluation, and system management for the AGILE project.
 
 ## Core Scripts
 
 ### `train.py`
-Main training script for RL agents using RSL-RL. Supports distributed training, video recording, and wandb logging. Use this to train new policies from scratch or resume training from checkpoints.
+Main training script for RL agents using RSL-RL. Supports distributed training, video recording, and W&B logging. Use this to train new policies from scratch or resume training from checkpoints.
 
 Example usage:
 ```bash
@@ -52,4 +52,4 @@ Hyperparameter optimization using Weights & Biases:
 - `run_sweep.py` - Run sweep agents for distributed hyperparameter search
 - `train_wrapper.py` - Wrapper script that processes sweep parameters
 - `sweep.yaml` - Sweep configuration defining parameter search spaces
-- See `wandb_sweep/README.md` for detailed usage instructions
+- See [wandb_sweep/README.md](scripts/wandb_sweep/README.md) for detailed usage instructions

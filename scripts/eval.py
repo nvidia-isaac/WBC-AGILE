@@ -428,6 +428,15 @@ def main():
     obs, _ = env.get_observations()
     timestep = 0
     num_steps = 0
+
+    # Check if we need to convert TensorDict to tensor for exported policies. This is necessary when we are loading
+    # a TorchScript policy instead of a regular checkpoint.
+    # Note: We check if it's a dict-like object, not just if it has "values" attribute
+    # (regular tensors have .values() method for sparse tensors, which would cause false positives)
+    is_tensordict_obs = isinstance(obs, dict) or (
+        hasattr(obs, "values") and callable(getattr(obs, "values", None)) and not isinstance(obs, torch.Tensor)
+    )
+
     # simulate environment
     while simulation_app.is_running() and num_steps < args_cli.num_steps:
         start_time = time.time()
@@ -438,8 +447,15 @@ def main():
 
         # run everything in inference mode
         with torch.inference_mode():
+            # Convert TensorDict to tensor if needed (for exported TorchScript policies)
+            if is_tensordict_obs and ppo_runner is None:
+                # Flatten TensorDict to tensor for exported policy
+                obs_tensor = torch.cat([v.flatten(start_dim=1) for v in obs.values()], dim=-1)
+            else:
+                obs_tensor = obs
+
             # agent stepping
-            actions = policy(obs)
+            actions = policy(obs_tensor)
             # env stepping
             obs, _, dones, extras = env.step(actions)
 

@@ -37,6 +37,7 @@ from rsl_rl.modules import (
     StudentTeacher,
     StudentTeacherRecurrent,
     StudentTrainedTeacher,
+    StudentTrainedTeacherRecurrent,
 )
 from rsl_rl.utils import store_code_state
 

@@ -50,9 +50,6 @@ dev = [
     "types-setuptools",
 ]
 
-[project.urls]
-Repository = "https://gitlab-master.nvidia.com/ml_nav/agile.git"
-
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["agile*", "workflow*", "wandb*"]

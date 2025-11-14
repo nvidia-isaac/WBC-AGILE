@@ -2,7 +2,7 @@
 
 ## Overview
 
-AGILE provides a comprehensive reinforcement learning framework for training whole-body control policies with validated sim-to-real transfer capabilities. Built on NVIDIA Isaac Lab, this toolkit enables researchers and practitioners to develop loco-manipulation behaviors for humanoid robots.
+**AGILE** provides a comprehensive reinforcement learning framework for training whole-body control policies with validated sim-to-real transfer capabilities. Built on NVIDIA Isaac Lab, this toolkit enables researchers and practitioners to develop loco-manipulation behaviors for humanoid robots.
 
 <details open>
 
@@ -12,24 +12,24 @@ AGILE provides a comprehensive reinforcement learning framework for training who
 
 **🤖 Robot Support & Validated Tasks**
 - **Multi-robot embodiments**: Unitree G1 and Booster T1
-- **Multi tasks**: Different task settings, including velocity tracking, height tracking and standing up to provide comprehensive examples for environment setup.
-- **Sim2Real validated**: Proven transfer for both G1 and T1 robots in real-world deployment
+- **Multiple tasks**: Different task settings, including velocity tracking, height tracking, and stand-up recovery to provide comprehensive examples for environment setup.
+- **Sim-to-Real validated**: Proven transfer for both G1 and T1 robots in real-world deployment
 
 
 **🛠️ Development & Debugging Tools**
-- **Debug environment**: Rapid prototyping task to verify joint configurations, rewards, symmetry and robot setup
+- **Debug environment**: Rapid prototyping task to verify joint configurations, rewards, symmetry, and robot setup
 - **Isaac Lab manager-based architecture**: Modular environment design for easy customization
 - **Extensive MDP library**: Delayed actuator models, terrain generation, [random action generator](agile/rl_env/mdp/actions/velocity_profiles/README.md), reward functions, and more
-- **IO export**: Exporting the whole task setup as a yaml file for quick deployment, see [scripts/README.md](agile/scripts/README.md)
+- **I/O export**: Export the entire task setup as a YAML file for quick deployment (see [scripts/README.md](agile/scripts/README.md))
 
 **📊 Training Infrastructure**
 - **Enhanced RSL-RL**: Extended with TensorDict support, entropy annealing, symmetry losses, and teacher-student distillation (see [MODIFICATIONS](agile/algorithms/rsl_rl/MODIFICATIONS.md))
-- **WandB integration**: Hyperparameter sweeps and experiment tracking with automatic Git commit logging.
+- **W&B (Weights & Biases) integration**: Hyperparameter sweeps and experiment tracking with automatic Git commit logging
 - **Adaptive curriculum**: Harness force simulation with progressive difficulty
 - **Teacher-student distillation**: Train robust policies with privileged information, then distill to deployable student policies
 
 **📈 Evaluation & Analysis**
-- **Deterministic evaluation**: Evaluation wrapper to allow to run the environment deterministically
+- **Deterministic evaluation**: Evaluation wrapper to run the environment deterministically
 - **Trajectory saving**: Export data for detailed offline analysis
 - **Automated report generation**: HTML reports with performance metrics and trajectory analysis
 
@@ -69,21 +69,38 @@ agile/                       # Repository root
 │   │   ├── install_deps_local.sh     # Install for local development
 │   │   └── setup_hooks.sh            # Set up git hooks
 │   ├── wandb_sweep/         # Hyperparameter optimization with W&B
-│   └── sys_id/              # System identification scripts
 ├── tests/                   # Test suite
-├── workflows/               # Support workflow such as docker file and remote cluster training.
+├── workflows/               # Support workflows such as Dockerfile
 ├── pyproject.toml           # Project configuration
 ├── CONTRIBUTING.md          # Contribution guidelines
 └── README.md                # Project documentation
 ```
 </details>
 
-<!-- ### Roadmap
-
-Future releases will expand AGILE's capabilities with additional behaviors and features:
-- **Extended behaviors**: Squatting with Sim2Real, torso RPY tracking, system identification
-- **Geometric fabrics**: Physics-informed locomotion control
-- **Manipulation policies**: Whole-body loco-manipulation tasks -->
+## Table of Contents
+- [Demos](#demos)
+- [Installation](#installation)
+  - [Prerequisites](#prerequisites)
+  - [Local Development Setup](#local-development-setup)
+- [Quick Start](#quick-start)
+- [Usage](#usage)
+  - [Embodiments](#embodiments)
+  - [Tasks & Policy Architecture](#tasks--policy-architecture)
+  - [Training](#training)
+  - [Teacher Student Distillation](#teacher-student-distillation)
+  - [Hyperparameter Sweep](#hyperparameter-sweep)
+  - [Evaluation](#evaluation)
+  - [Play](#play)
+  - [Testing](#testing)
+- [Development](#development)
+  - [Docker Build Process](#docker-build-process)
+  - [Pre-commit Hooks](#pre-commit-hooks)
+- [Deployment](#deployment)
+- [Troubleshooting](#troubleshooting)
+- [Contributing](#contributing)
+- [License](#license)
+- [Core Contributors](#core-contributors)
+- [Acknowledgments](#acknowledgments)
 
 ## Demos
 
@@ -125,8 +142,8 @@ Future releases will expand AGILE's capabilities with additional behaviors and f
 ### Prerequisites
 
 **Install Isaac Lab 2.3.0**:
-Follow the installation [guide](https://isaac-sim.github.io/IsaacLab/v2.3.0/source/setup/installation/index.html). Note that, Isaac Sim 5.1 is required to use the verified USD provided in this project.
-We recommend using the conda installation. Remember to checkout to the specific branch shown as the following.
+Follow the installation [guide](https://isaac-sim.github.io/IsaacLab/v2.3.0/source/setup/installation/index.html). Note that Isaac Sim 5.1 is required to use the verified USD provided in this project.
+We recommend using the conda installation. Remember to check out the specific branch as follows.
    ```bash
    # Ensure you're using version 2.3.0
    git checkout v2.3.0
@@ -158,6 +175,40 @@ The `scripts/setup/install_deps_local.sh` script will:
 - Install the agile package
 </details>
 
+## Quick Start
+
+<details open>
+<summary> Getting Started </summary>
+
+Get started with AGILE in three simple steps locally:
+
+**1. Train a velocity tracking policy:**
+
+```bash
+python scripts/train.py \
+    --task Velocity-T1-v0 \
+    --num_envs 2048 \
+    --headless
+```
+
+**2. Visualize the trained policy:**
+
+```bash
+# After training completes, visualize the policy
+python scripts/play.py \
+    --task Velocity-T1-v0 \
+    --num_envs 32 \
+    --checkpoint <path_to_checkpoint>
+```
+
+
+> **💡 Next Steps:**
+> - Explore [available tasks](#tasks--policy-architecture) for different robots and behaviors
+> - Learn about [teacher-student distillation](#teacher-student-distillation) for robust deployment
+> - See [Evaluation](#evaluation) for performance analysis and metrics
+
+</details>
+
 ## Usage
 
 <details>
@@ -167,12 +218,43 @@ The framework has been validated on two humanoid robots: Booster T1 and Unitree 
 
 </details>
 
-<details>
-<summary> Tasks </summary>
+<details open>
+<summary> Tasks & Policy Architecture </summary>
 
-### Tasks
+### Tasks & Policy Architecture
 
-This project supports multiple tasks across different robot embodiments (G1 and T1). For detailed task descriptions and configurations, see the task [README](agile/rl_env/tasks/README.md).
+#### Modular Policy Design
+
+AGILE uses a modular approach to enable complex loco-manipulation behaviors:
+
+<p align="center">
+  <img src="docs/figures/separate_upper_lower_body_policy_diagram.png" alt="Modular Policy Architecture" width="80%">
+</p>
+
+The framework separates **lower body locomotion** (trained via RL) from **upper body control** (IK/IL/Random), with optional distillation to deployable student policies. This architecture enables flexible behavior composition and efficient training strategies.
+
+**🎯 Teleoperation Integration**: AGILE policies power [Isaac Lab's official teleoperation examples](https://isaac-sim.github.io/IsaacLab/main/source/overview/imitation-learning/teleop_imitation.html#teleoperation). For optimal performance, use the latest policies from this repository—Isaac Lab will be updated with these improved versions soon.
+
+> **Note**: This modular architecture represents our current implementation focus for loco-manipulation tasks, particularly enabling **teleoperation** where the upper body responds to external commands while maintaining stable locomotion. AGILE is not limited to this approach—the framework supports various policy architectures including unified full-body control (e.g., stand-up task) and will expand to support additional architectures in future releases.
+
+#### Self-Contained Task Design
+
+Each task configuration is **intentionally self-contained** with all MDP components in one file:
+
+- ✅ **Transparent & Maintainable**: Complete setup visible without inheritance tracing
+- ✅ **Collaboration-Friendly**: Developers work independently without conflicts
+- ✅ **Fast Iteration**: Localized changes with immediate, visible impact
+
+#### Available Tasks
+
+This project supports multiple tasks across different robot embodiments (G1 and T1):
+
+- **Locomotion**: Velocity tracking for G1 (legs + waist) and T1 (legs only)
+- **Locomotion + Height**: Extended tracking with height commands, includes teacher and student distillation variants (recurrent & history-based)
+- **Stand Up**: Full-body autonomous recovery from arbitrary fallen poses
+
+> 📖 **For detailed task specifications, MDP configurations, complete design philosophy, and training pipeline documentation, see the [Task README](agile/rl_env/tasks/README.md).**
+
 </details>
 
 <details>
@@ -180,13 +262,13 @@ This project supports multiple tasks across different robot embodiments (G1 and 
 
 ### Training
 
-Following the convention of Isaac Lab, most of the training configuration is in the corresponding `rsl_rl_ppo_cfg.py` file. It is still possible to overwrite some of them. Run the following command for details.
-```py
+Following Isaac Lab conventions, most training configuration lives in the corresponding `rsl_rl_ppo_cfg.py` file. Many options can be overridden via CLI. Run for full help:
+```bash
 python scripts/train.py -h
 ```
 
-For local training, it can be started with the following command. We use wandb for logging by default.
-```py
+For local training, use the following command. We use W&B for logging by default.
+```bash
 python scripts/train.py \
     --task Velocity-T1-v0 \
     --num_envs 4096 \
@@ -196,7 +278,7 @@ python scripts/train.py \
     --run_name test
 ```
 
-> **💡 Experiment Reproducibility:** Training (including evaluation) automatically captures and logs lightweight git metadata (commit hash, branch, uncommitted changes, and diffs) to your experiment logs. When using wandb, this information is uploaded to your run for easy tracking and reproduction. This ensures you can always trace back the exact code state—including any staged or unstaged changes—used for any experiment, without storing the entire repository.
+> **💡 Experiment Reproducibility:** Training (including evaluation) automatically captures and logs lightweight git metadata (commit hash, branch, uncommitted changes, and diffs) to your experiment logs. When using W&B, this information is uploaded to your run for easy tracking and reproduction. This ensures you can always trace back the exact code state—including any staged or unstaged changes—used for any experiment, without storing the entire repository.
 
 
 </details>
@@ -276,7 +358,7 @@ To play and export a trained policy, use the `scripts/play.py` script, e.g.,:
 ```bash
 python scripts/play.py --num_envs 32 --task Velocity-Height-G1-v0 --resume RESUME --load_run 2025-01-01_00-00-0_task_name
 ```
-Use the `resume` and `load_run` flag to select the run to export. This will save the exported policy (onnx and torch.jit) in the `exported` directory.
+Use the `resume` and `load_run` flags to select the run to export. This saves the exported policy (ONNX and TorchScript) in the `exported/` directory. You can also provide a `checkpoint` path directly.
 </details>
 
 <details>
@@ -295,9 +377,6 @@ Use the `resume` and `load_run` flag to select the run to export. This will save
 See [tests/README.md](tests/README.md) for detailed testing guide.
 </details>
 
-
-## Deployment
-Policy deployment for both sim-to-sim and sim-to-real transfer currently utilizes NVIDIA's internal deployment framework, which is planned for public release in the near future.
 
 ## Development
 
@@ -334,11 +413,14 @@ pre-commit run --all-files
 The pre-commit configuration includes:
 - Code formatting with Black and isort
 - Linting with Flake8
-- Type checking with MyPy
+- Type checking with mypy
 - Various file checks (trailing whitespace, merge conflicts, etc.)
 
 Note: The `third_party` directory is excluded from all pre-commit hooks to preserve the original code style of external dependencies.
 </details>
+
+## Deployment
+Policy deployment for both sim-to-sim and sim-to-real transfer currently utilizes NVIDIA's internal deployment framework, which is planned for public release in the near future.
 
 ## Troubleshooting
 
@@ -372,3 +454,12 @@ Please see [CONTRIBUTING.md](CONTRIBUTING.md) for detailed information on how to
 ## License
 
 This project is licensed under the NVIDIA license - see the license headers in source files for details.
+
+## Core Contributors
+Huihua Zhao, Rafael Cathomen, Lionel Gulich, Efe Arda Ongan, Michael Lin, Shalin Jain, Wei Liu, Vishal Kulkarni, Soha Pouya, Yan Chang
+
+## Acknowledgments
+We would like to acknowledge the following projects from which parts of the code in this repo are derived:
+- [Beyond Mimic](https://github.com/HybridRobotics/whole_body_tracking)
+- [RSL_RL](https://github.com/leggedrobotics/rsl_rl)
+- [Isaac Lab](https://github.com/isaac-sim/IsaacLab)
