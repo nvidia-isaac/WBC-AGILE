@@ -27,7 +27,7 @@ Training checkpoints that support recurrent policies and batched evaluation.
 | Policy | Task | Format | Description |
 |--------|------|--------|-------------|
 | `velocity_g1/unitree_g1_velocity_history.pt` | `Velocity-G1-History-v0` | TorchScript | G1 velocity tracking (history-based) |
-| `velocity_height_g1/exported/policy.pt` | `Velocity-Height-G1-v0` | TorchScript | G1 teacher with height map |
+| `velocity_height_g1/unitree_g1_velocity_height_teacher.pt` | `Velocity-Height-G1-v0` | TorchScript | G1 teacher with height map |
 | `velocity_height_g1/unitree_g1_velocity_height_recurrent_student.pt` | `Velocity-Height-G1-Distillation-Recurrent-v0` | Checkpoint | G1 recurrent LSTM student |
 | `velocity_t1/booster_t1_velocity_v0.pt` | `Velocity-T1-v0` | TorchScript | T1 velocity tracking (history-based) |
 
