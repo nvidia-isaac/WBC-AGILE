@@ -68,7 +68,7 @@ observations:
       mdp_type: Observation
       full_path: isaaclab.envs.mdp.observations.joint_pos_rel
       shape:
-        - 43
+        - 29
       dtype: torch.float32
       observation_type: JointState
       joint_names:
@@ -101,20 +101,6 @@ observations:
         - right_wrist_pitch_joint
         - left_wrist_yaw_joint
         - right_wrist_yaw_joint
-        - left_hand_index_0_joint
-        - left_hand_middle_0_joint
-        - left_hand_thumb_0_joint
-        - right_hand_index_0_joint
-        - right_hand_middle_0_joint
-        - right_hand_thumb_0_joint
-        - left_hand_index_1_joint
-        - left_hand_middle_1_joint
-        - left_hand_thumb_1_joint
-        - right_hand_index_1_joint
-        - right_hand_middle_1_joint
-        - right_hand_thumb_1_joint
-        - left_hand_thumb_2_joint
-        - right_hand_thumb_2_joint
       joint_pos_offsets:
         - -0.10000000149011612
         - -0.10000000149011612
@@ -145,20 +131,6 @@ observations:
         - 0.0
         - 0.0
         - 0.0
-        - 0.0
-        - 0.0
-        - 0.0
-        - 0.0
-        - 0.0
-        - 0.0
-        - 0.0
-        - 0.0
-        - 0.0
-        - 0.0
-        - 0.0
-        - 0.0
-        - 0.0
-        - 0.0
     - name: joint_vel_rel
       overloads:
         clip: null
@@ -172,7 +144,7 @@ observations:
       mdp_type: Observation
       full_path: isaaclab.envs.mdp.observations.joint_vel_rel
       shape:
-        - 43
+        - 29
       dtype: torch.float32
       observation_type: JointState
       joint_names:
@@ -205,35 +177,7 @@ observations:
         - right_wrist_pitch_joint
         - left_wrist_yaw_joint
         - right_wrist_yaw_joint
-        - left_hand_index_0_joint
-        - left_hand_middle_0_joint
-        - left_hand_thumb_0_joint
-        - right_hand_index_0_joint
-        - right_hand_middle_0_joint
-        - right_hand_thumb_0_joint
-        - left_hand_index_1_joint
-        - left_hand_middle_1_joint
-        - left_hand_thumb_1_joint
-        - right_hand_index_1_joint
-        - right_hand_middle_1_joint
-        - right_hand_thumb_1_joint
-        - left_hand_thumb_2_joint
-        - right_hand_thumb_2_joint
       joint_vel_offsets:
-        - 0.0
-        - 0.0
-        - 0.0
-        - 0.0
-        - 0.0
-        - 0.0
-        - 0.0
-        - 0.0
-        - 0.0
-        - 0.0
-        - 0.0
-        - 0.0
-        - 0.0
-        - 0.0
         - 0.0
         - 0.0
         - 0.0
@@ -386,20 +330,6 @@ articulations:
       - right_wrist_pitch_joint
       - left_wrist_yaw_joint
       - right_wrist_yaw_joint
-      - left_hand_index_0_joint
-      - left_hand_middle_0_joint
-      - left_hand_thumb_0_joint
-      - right_hand_index_0_joint
-      - right_hand_middle_0_joint
-      - right_hand_thumb_0_joint
-      - left_hand_index_1_joint
-      - left_hand_middle_1_joint
-      - left_hand_thumb_1_joint
-      - right_hand_index_1_joint
-      - right_hand_middle_1_joint
-      - right_hand_thumb_1_joint
-      - left_hand_thumb_2_joint
-      - right_hand_thumb_2_joint
     default_joint_pos:
       - -0.10000000149011612
       - -0.10000000149011612
@@ -430,35 +360,7 @@ articulations:
       - 0.0
       - 0.0
       - 0.0
-      - 0.0
-      - 0.0
-      - 0.0
-      - 0.0
-      - 0.0
-      - 0.0
-      - 0.0
-      - 0.0
-      - 0.0
-      - 0.0
-      - 0.0
-      - 0.0
-      - 0.0
-      - 0.0
     default_joint_vel:
-      - 0.0
-      - 0.0
-      - 0.0
-      - 0.0
-      - 0.0
-      - 0.0
-      - 0.0
-      - 0.0
-      - 0.0
-      - 0.0
-      - 0.0
-      - 0.0
-      - 0.0
-      - 0.0
       - 0.0
       - 0.0
       - 0.0
@@ -547,34 +449,6 @@ articulations:
         - 1.6144295930862427
       - - -1.6144295930862427
         - 1.6144295930862427
-      - - -1.5707963705062866
-        - 0.0
-      - - -1.5707963705062866
-        - 0.0
-      - - -1.0471975803375244
-        - 1.0471975803375244
-      - - 0.0
-        - 1.5707963705062866
-      - - 0.0
-        - 1.5707963705062866
-      - - -1.0471975803375244
-        - 1.0471975803375244
-      - - -1.7453291416168213
-        - 0.0
-      - - -1.7453291416168213
-        - 0.0
-      - - -0.7243116497993469
-        - 1.0471975803375244
-      - - 0.0
-        - 1.7453291416168213
-      - - 0.0
-        - 1.7453291416168213
-      - - -1.0471975803375244
-        - 0.7243116497993469
-      - - 0.0
-        - 1.7453291416168213
-      - - -1.7453291416168213
-        - 0.0
     default_joint_damping:
       - 2.557889699935913
       - 2.557889699935913
@@ -605,20 +479,6 @@ articulations:
       - 0.20000000298023224
       - 0.20000000298023224
       - 0.20000000298023224
-      - 0.026150060817599297
-      - 0.026104284450411797
-      - 0.00929284282028675
-      - 0.026150071993470192
-      - 0.026104293763637543
-      - 0.0092928446829319
-      - 0.0022244243882596493
-      - 0.0022244276478886604
-      - 0.00737222284078598
-      - 0.0022244243882596493
-      - 0.002224427880719304
-      - 0.007372223772108555
-      - 0.002224378054961562
-      - 0.002224378287792206
     default_joint_stiffness:
       - 40.179237365722656
       - 40.179237365722656
@@ -649,35 +509,7 @@ articulations:
       - 4.0
       - 4.0
       - 4.0
-      - 65.37516021728516
-      - 65.2607192993164
-      - 23.232107162475586
-      - 65.37517547607422
-      - 65.26073455810547
-      - 23.23211097717285
-      - 5.561060905456543
-      - 5.561069011688232
-      - 18.430557250976562
-      - 5.561060905456543
-      - 5.561069488525391
-      - 18.430561065673828
-      - 5.5609450340271
-      - 5.560945987701416
     default_joint_friction:
-      - 0.0
-      - 0.0
-      - 0.0
-      - 0.0
-      - 0.0
-      - 0.0
-      - 0.0
-      - 0.0
-      - 0.0
-      - 0.0
-      - 0.0
-      - 0.0
-      - 0.0
-      - 0.0
       - 0.0
       - 0.0
       - 0.0
@@ -737,20 +569,6 @@ articulations:
       - 0.029999999329447746
       - 0.029999999329447746
       - 0.029999999329447746
-      - 0.0
-      - 0.0
-      - 0.0
-      - 0.0
-      - 0.0
-      - 0.0
-      - 0.0
-      - 0.0
-      - 0.0
-      - 0.0
-      - 0.0
-      - 0.0
-      - 0.0
-      - 0.0
 scene:
   physics_dt: 0.005
   dt: 0.02

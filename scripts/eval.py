@@ -221,6 +221,8 @@ def load_policy(resume_path, env, agent_cfg):
 
     This function intelligently detects the checkpoint format and loads accordingly:
     - TorchScript (.pt): Directly loads the exported policy (includes normalizer)
+      * NOTE: Recurrent TorchScript policies are skipped because they're exported for
+        single-env inference and don't work well with batched evaluation
     - Regular checkpoint (.pt): Loads through OnPolicyRunner (includes optimizer state, etc.)
 
     Args:
@@ -239,9 +241,19 @@ def load_policy(resume_path, env, agent_cfg):
     try:
         policy = torch.jit.load(resume_path, map_location=device)
         policy.eval()
-        print(f"[INFO] Loaded TorchScript policy from: {resume_path}")
-        print("[INFO] TorchScript policies are self-contained (include normalizer)")
-        return policy, None
+
+        # Check if it's a recurrent policy - if so, skip TorchScript and use regular checkpoint
+        # Recurrent TorchScript policies are exported for single-env inference, which doesn't
+        # work well with batched evaluation (would require per-env policy calls)
+        if hasattr(policy, "is_recurrent") and policy.is_recurrent:
+            print(
+                f"[INFO] Detected recurrent TorchScript policy, falling back to regular checkpoint for batched evaluation"
+            )
+            # Fall through to regular checkpoint loading
+        else:
+            print(f"[INFO] Loaded TorchScript policy from: {resume_path}")
+            print("[INFO] TorchScript policies are self-contained (include normalizer)")
+            return policy, None
 
     except (RuntimeError, AttributeError, pickle.UnpicklingError) as e:
         # Not a valid TorchScript file, try regular checkpoint
@@ -465,7 +477,7 @@ def main():
             # The scheduler also recomputes observations to reflect the corrected commands.
             if scheduler:
                 scheduler.reapply_commands()
-                # Get the recomputed observations
+                # Get the recomputed observations and extras
                 obs, extras = env.get_observations()
 
                 # CRITICAL FIX: _update_command() inside observation_manager.compute() may have
@@ -566,7 +578,22 @@ def main():
 
 
 if __name__ == "__main__":
-    # run the main function
-    main()
-    # close sim app
-    simulation_app.close()
+    # run the main function with propery error handling for CI/CD.
+    exit_code = 0
+    try:
+        main()
+    except Exception as e:
+        import traceback
+
+        print(f"\n[ERROR] Evaluation failed with exception: {e}", flush=True)
+        traceback.print_exc()
+        exit_code = 1
+    finally:
+        # close sim app
+        simulation_app.close()
+
+    # Exit with appropriate code
+    if exit_code != 0:
+        import sys
+
+        sys.exit(exit_code)

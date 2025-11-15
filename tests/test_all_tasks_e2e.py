@@ -104,6 +104,32 @@ class TestAllTasks(unittest.TestCase):
         ]
         return tasks
 
+    @classmethod
+    def get_tasks_with_checkpoints(cls) -> dict[str, str]:
+        """Get tasks that have pre-trained checkpoints available.
+
+        Returns:
+            Dictionary mapping task names to checkpoint paths relative to project root.
+        """
+        # Get absolute path to the data/policy directory
+        policy_dir = os.path.join(cls.project_root, "agile", "data", "policy")
+
+        tasks_with_checkpoints = {
+            "Velocity-T1-v0": os.path.join(policy_dir, "velocity_t1", "booster_t1_velocity_v0.pt"),
+            "Velocity-G1-History-v0": os.path.join(policy_dir, "velocity_g1", "unitree_g1_velocity_history.pt"),
+            "Velocity-Height-G1-v0": os.path.join(
+                policy_dir, "velocity_height_g1", "unitree_g1_velocity_height_teacher.pt"
+            ),
+            "Velocity-Height-G1-Distillation-Recurrent-v0": os.path.join(
+                policy_dir, "velocity_height_g1", "unitree_g1_velocity_height_recurrent_student.pt"
+            ),
+        }
+
+        # Filter out tasks where checkpoint files don't exist
+        available_tasks = {task: path for task, path in tasks_with_checkpoints.items() if os.path.exists(path)}
+
+        return available_tasks
+
     def test_task_training(self):
         """Test that each task can be trained for a few iterations."""
         # Number of iterations for testing (keep small for CI)
@@ -193,8 +219,6 @@ class TestAllTasks(unittest.TestCase):
         # Show GPU status
         if not self.gpu_available:
             print("⚠️  WARNING: Tests ran WITHOUT GPU - failures expected!")
-        else:
-            print("✅ GPU available")
 
         print(f"\nTotal tasks tested: {len(self.tasks)}")
         print(f"Passed: {len(self.tasks) - len(failed_tasks)}")
@@ -213,6 +237,116 @@ class TestAllTasks(unittest.TestCase):
                 self.fail(f"{len(failed_tasks)} task(s) failed training test")
         else:
             print("\n✅ All tasks passed!")
+
+    def test_task_evaluation(self):
+        """Test that each task with a checkpoint can be evaluated."""
+        # Number of steps for testing (keep small for CI)
+        num_steps = 50  # Enough steps to catch initialization and runtime errors
+        num_envs = 2  # Small number of environments for testing
+
+        # Get tasks with available checkpoints
+        tasks_with_checkpoints = self.get_tasks_with_checkpoints()
+
+        if not tasks_with_checkpoints:
+            self.skipTest("No pre-trained checkpoints available for evaluation")
+
+        failed_tasks = []
+
+        for task, checkpoint_path in tasks_with_checkpoints.items():
+            with self.subTest(task=task):
+                print(f"\n{'=' * 60}", flush=True)
+                print(f"Testing evaluation: {task}", flush=True)
+                print("=" * 60, flush=True)
+
+                # Create a temporary directory for this task's outputs
+                with tempfile.TemporaryDirectory() as _temp_dir:
+                    # Command to run evaluation
+                    cmd = [
+                        self.isaaclab_script,
+                        "-p",
+                        os.path.join(self.project_root, "scripts", "eval.py"),
+                        "--task",
+                        task,
+                        "--checkpoint",
+                        checkpoint_path,
+                        "--num_envs",
+                        str(num_envs),
+                        "--num_steps",
+                        str(num_steps),
+                        "--headless",
+                    ]
+
+                    # Environment variables for command execution
+                    env = dict(os.environ)
+                    env["WANDB_MODE"] = "disabled"  # Disable wandb
+                    env["OMNI_HEADLESS"] = "1"
+                    env["DISPLAY"] = ":1"
+
+                    try:
+                        # Run the command with timeout
+                        result = subprocess.run(
+                            cmd,
+                            check=True,  # Will raise exception if process returns non-zero
+                            timeout=120,  # 2 minutes timeout per task
+                            capture_output=True,
+                            text=True,
+                            env=env,
+                        )
+
+                        print(f"✅ Evaluation for task {task} passed", flush=True)
+
+                        # Optionally print output for debugging
+                        if os.environ.get("VERBOSE_E2E_TESTS") == "true":
+                            print(f"Command: {' '.join(cmd)}")
+                            print("STDOUT:")
+                            print(result.stdout[-1000:])  # Last 1000 chars
+
+                    except subprocess.CalledProcessError as e:
+                        failed_tasks.append(task)
+                        print(f"❌ Evaluation for task {task} failed with return code {e.returncode}", flush=True)
+                        print(f"Command: {' '.join(cmd)}", flush=True)
+                        print(f"Checkpoint: {checkpoint_path}", flush=True)
+                        print("\nLast 2000 chars of STDOUT:", flush=True)
+                        print(e.stdout[-2000:] if e.stdout else "No stdout", flush=True)
+                        print("\nLast 2000 chars of STDERR:", flush=True)
+                        print(e.stderr[-2000:] if e.stderr else "No stderr", flush=True)
+
+                    except subprocess.TimeoutExpired as e:
+                        failed_tasks.append(task)
+                        print(f"❌ Evaluation for task {task} timed out", flush=True)
+                        print(f"Command: {' '.join(cmd)}", flush=True)
+                        print(f"Checkpoint: {checkpoint_path}", flush=True)
+                        print("Partial STDOUT:", flush=True)
+                        print(e.stdout[-2000:] if e.stdout else "No output", flush=True)
+                        print("Partial STDERR:", flush=True)
+                        print(e.stderr[-2000:] if e.stderr else "No output", flush=True)
+
+        # Report summary
+        print(f"\n{'=' * 60}")
+        print("Evaluation Test Summary")
+        print("=" * 60)
+
+        # Show GPU status
+        if not self.gpu_available:
+            print("⚠️  WARNING: Tests ran WITHOUT GPU - failures expected!")
+
+        print(f"\nTotal tasks tested: {len(tasks_with_checkpoints)}")
+        print(f"Passed: {len(tasks_with_checkpoints) - len(failed_tasks)}")
+        print(f"Failed: {len(failed_tasks)}")
+
+        if failed_tasks:
+            print("\nFailed tasks:")
+            for task in failed_tasks:
+                print(f"  - {task}")
+
+            # Different failure message depending on GPU availability
+            if not self.gpu_available:
+                msg = f"{len(failed_tasks)} task(s) failed - GPU not available, failures expected"
+                self.fail(msg)
+            else:
+                self.fail(f"{len(failed_tasks)} task(s) failed evaluation test")
+        else:
+            print("\n✅ All evaluation tests passed!")
 
 
 if __name__ == "__main__":
