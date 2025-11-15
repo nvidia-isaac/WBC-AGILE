@@ -135,16 +135,29 @@ def prepare_env_for_playing(env_cfg: ManagerBasedRLEnvCfg) -> ManagerBasedRLEnvC
 
 
 def load_policy(resume_path, env, agent_cfg):
-    """Load policy from either TorchScript or regular checkpoint."""
+    """Load policy from either TorchScript or regular checkpoint.
+
+    NOTE: Recurrent TorchScript policies are skipped because they're exported for
+    single-env inference and don't work well with batched evaluation.
+    """
 
     device = env.unwrapped.device
 
     try:
         policy = torch.jit.load(resume_path, map_location=device)
         policy.eval()
-        print(f"[INFO] Loaded TorchScript policy from: {resume_path}")
-        print("[INFO] TorchScript policies are self-contained (include normalizer)")
-        return policy, None
+
+        # Check if it's a recurrent policy - if so, skip TorchScript and use regular checkpoint
+        # Recurrent TorchScript policies are exported for single-env inference
+        if hasattr(policy, "is_recurrent") and policy.is_recurrent:
+            print(
+                f"[INFO] Detected recurrent TorchScript policy, falling back to regular checkpoint for batched evaluation"
+            )
+            # Fall through to regular checkpoint loading
+        else:
+            print(f"[INFO] Loaded TorchScript policy from: {resume_path}")
+            print("[INFO] TorchScript policies are self-contained (include normalizer)")
+            return policy, None
     except (RuntimeError, AttributeError, pickle.UnpicklingError) as e:
         print(f"[INFO] Not a TorchScript file (error: {type(e).__name__}), loading as regular checkpoint...")
 

@@ -254,6 +254,10 @@ This project supports multiple tasks across different robot embodiments (G1 and 
 - **Stand Up**: Full-body autonomous recovery from arbitrary fallen poses
 
 > 📖 **For detailed task specifications, MDP configurations, complete design philosophy, and training pipeline documentation, see the [Task README](agile/rl_env/tasks/README.md).**
+>
+> 💡 **We've included [Lessons Learned](LESSONS_LEARNED.md) to share practical insights and tips from our experience developing these policies—from robot modeling to sim-to-real deployment.**
+
+
 
 </details>
 
@@ -422,6 +426,8 @@ Note: The `third_party` directory is excluded from all pre-commit hooks to prese
 ## Deployment
 Policy deployment for both sim-to-sim and sim-to-real transfer currently utilizes NVIDIA's internal deployment framework, which is planned for public release in the near future.
 
+**Pre-trained Policies:** We include several verified pre-trained checkpoints in the repository for evaluation and deployment. See [`agile/data/policy/README.md`](agile/data/policy/README.md) for available policies and usage instructions.
+
 ## Troubleshooting
 
 <details>
@@ -453,7 +459,25 @@ Please see [CONTRIBUTING.md](CONTRIBUTING.md) for detailed information on how to
 
 ## License
 
-This project is licensed under the NVIDIA license - see the license headers in source files for details.
+This repository contains code under two different open-source licenses:
+
+### BSD 3-Clause License
+The reinforcement learning algorithm library located in `agile/algorithms/rsl_rl/` is licensed under the **BSD 3-Clause License**.
+- **Copyright holders:** ETH Zurich, NVIDIA CORPORATION & AFFILIATES
+- This portion is based on the [RSL_RL](https://github.com/leggedrobotics/rsl_rl) library developed at ETH Zurich
+- See the full BSD 3-Clause license text in the [LICENCE](LICENCE) file (Section A)
+
+### Apache License 2.0
+All other portions of this repository are licensed under the **Apache License 2.0**.
+- **Copyright holder:** NVIDIA CORPORATION & AFFILIATES
+- See the full Apache 2.0 license text in the [LICENCE](LICENCE) file (Section B)
+
+### Compliance
+When using or distributing this software, you must comply with both licenses as applicable:
+- If you modify or redistribute the `agile/algorithms/rsl_rl/` directory, comply with the BSD 3-Clause License terms
+- For all other code, comply with the Apache 2.0 License terms
+
+For complete license information and full terms, see the [LICENCE](LICENCE) file at the root of this repository.
 
 ## Core Contributors
 Huihua Zhao, Rafael Cathomen, Lionel Gulich, Efe Arda Ongan, Michael Lin, Shalin Jain, Wei Liu, Vishal Kulkarni, Soha Pouya, Yan Chang
