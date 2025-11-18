@@ -410,6 +410,14 @@ def main():
         else:
             print("[INFO] Saving all trajectory fields.")
 
+        # Extract joint group config if available
+        joint_group_config = None
+        if eval_config is not None and eval_config.joint_groups:
+            joint_group_config = eval_config.joint_groups
+            print(f"[INFO] Using joint groups from config: {list(joint_group_config.keys())}")
+        else:
+            print("[INFO] No joint groups specified, using 'default' group with all joints")
+
         # Calculate total episodes to collect
         # If eval_config is provided, use num_envs * num_episodes, otherwise just num_envs
         if eval_config is not None:
@@ -429,6 +437,7 @@ def main():
             verbose=True,
             save_trajectories=args_cli.save_trajectories,
             trajectory_fields=args_cli.trajectory_fields,
+            joint_group_config=joint_group_config,
         )
 
     env.reset()

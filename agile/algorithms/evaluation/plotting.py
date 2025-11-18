@@ -400,8 +400,11 @@ def plot_tracking_performance(
     return fig, axes
 
 
-def calculate_velocity_height_tracking_errors(df: pd.DataFrame) -> dict:
-    """Calculate tracking error statistics for velocity+height commands.
+def calculate_tracking_errors(df: pd.DataFrame) -> dict:
+    """Calculate tracking error statistics for any command structure.
+
+    Works with velocity-only (3 fields) or velocity+height (4 fields) commands.
+    Only calculates errors for command fields that exist in the DataFrame.
 
     Args:
         df: DataFrame with trajectory data including commands and actual state
@@ -413,7 +416,7 @@ def calculate_velocity_height_tracking_errors(df: pd.DataFrame) -> dict:
 
     Example:
         >>> df = load_episode("logs/evaluation/task", episode_id=0)
-        >>> errors = calculate_velocity_height_tracking_errors(df)
+        >>> errors = calculate_tracking_errors(df)
         >>> print(f"X velocity mean error: {errors['lin_vel_x']['mean']:.3f}")
     """
     errors = {}

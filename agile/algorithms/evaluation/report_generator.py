@@ -38,13 +38,13 @@ sys.path.insert(0, str(Path(__file__).parent))
 try:
     # Try absolute import first (when used as module)
     from agile.algorithms.evaluation.plotting import (
-        calculate_velocity_height_tracking_errors,
+        calculate_tracking_errors,
         load_episode,
         load_metadata,
     )
 except ImportError:
     # Fall back to direct import (when run standalone)
-    from plotting import calculate_velocity_height_tracking_errors, load_episode, load_metadata
+    from plotting import calculate_tracking_errors, load_episode, load_metadata
 
 
 class TrajectoryReportGenerator:
@@ -285,10 +285,10 @@ class TrajectoryReportGenerator:
     def _calculate_tracking_errors(self, df: pd.DataFrame) -> dict:
         """Calculate tracking error statistics."""
         # Reuse utility function from plotting module
-        return calculate_velocity_height_tracking_errors(df)
+        return calculate_tracking_errors(df)
 
     def _generate_tracking_plot(self, df: pd.DataFrame, episode_id: int) -> str:
-        """Generate plotly tracking performance plot."""
+        """Generate plotly tracking performance plot (dynamic for variable command structures)."""
         command_prefix = (
             "commands" if "commands_0" in df.columns else ("command" if "command_0" in df.columns else None)
         )
@@ -296,41 +296,54 @@ class TrajectoryReportGenerator:
         if not command_prefix:
             return "<p>Command data not available for this episode.</p>"
 
-        # Create subplots for tracking
+        timestep = df["timestep"]
+
+        # Dynamically detect available command fields and their corresponding state variables
+        quantities = []
+        cmd_idx = 0
+
+        # Common command field mappings (in order)
+        # Format: (cmd_idx, actual_col, fallback_col, unit, label)
+        potential_mappings = [
+            (0, "root_lin_vel_robot_0", "root_lin_vel_0", "m/s", "Linear Velocity X"),
+            (1, "root_lin_vel_robot_1", "root_lin_vel_1", "m/s", "Linear Velocity Y"),
+            (2, "root_ang_vel_2", None, "rad/s", "Angular Velocity Z"),
+            (3, "root_pos_2", None, "m", "Height"),
+        ]
+
+        for cmd_idx, actual_col, fallback_col, unit, label in potential_mappings:
+            cmd_col = f"{command_prefix}_{cmd_idx}"
+
+            # Check if this command field exists
+            if cmd_col not in df.columns:
+                break  # No more command fields
+
+            # Determine actual state column to use
+            state_col = None
+            if actual_col and actual_col in df.columns:
+                state_col = actual_col
+            elif fallback_col and fallback_col in df.columns:
+                state_col = fallback_col
+
+            if state_col:
+                quantities.append((state_col, cmd_col, unit, label))
+
+        if not quantities:
+            return "<p>No trackable command-state pairs found in this episode.</p>"
+
+        # Create subplots with dynamic number of rows
+        subplot_titles = tuple(q[3] for q in quantities)  # Extract labels
         fig = sp.make_subplots(
-            rows=4,
+            rows=len(quantities),
             cols=1,
-            subplot_titles=("Linear Velocity X", "Linear Velocity Y", "Angular Velocity Z", "Height"),
+            subplot_titles=subplot_titles,
             vertical_spacing=0.08,
         )
 
-        timestep = df["timestep"]
-
         # Add traces for each tracking quantity
-        # Prefer robot frame velocities (aligned with commands), fallback to world frame
-        quantities = [
-            (
-                "root_lin_vel_robot_0" if "root_lin_vel_robot_0" in df.columns else "root_lin_vel_0",
-                f"{command_prefix}_0",
-                "m/s",
-                1,
-            ),
-            (
-                "root_lin_vel_robot_1" if "root_lin_vel_robot_1" in df.columns else "root_lin_vel_1",
-                f"{command_prefix}_1",
-                "m/s",
-                2,
-            ),
-            (
-                "root_ang_vel_2",  # Yaw rate is same in both world and robot frames
-                f"{command_prefix}_2",
-                "rad/s",
-                3,
-            ),
-            ("root_pos_2", f"{command_prefix}_3", "m", 4),
-        ]
+        for idx, (actual_col, cmd_col, unit, _label) in enumerate(quantities):
+            row = idx + 1  # plotly rows are 1-indexed
 
-        for actual_col, cmd_col, unit, row in quantities:
             if actual_col in df.columns and cmd_col in df.columns:
                 # Actual
                 fig.add_trace(
@@ -359,56 +372,70 @@ class TrajectoryReportGenerator:
 
                 fig.update_yaxes(title_text=unit, row=row, col=1)
 
-        fig.update_xaxes(title_text="Time (s)", row=4, col=1)
-        fig.update_layout(height=1000, title_text=f"Tracking Performance - Episode {episode_id}", hovermode="x unified")
+        # Add x-axis label to bottom row (dynamic)
+        fig.update_xaxes(title_text="Time (s)", row=len(quantities), col=1)
+
+        # Dynamic height based on number of command fields
+        plot_height = max(600, len(quantities) * 250)
+        fig.update_layout(
+            height=plot_height, title_text=f"Tracking Performance - Episode {episode_id}", hovermode="x unified"
+        )
 
         return fig.to_html(include_plotlyjs=False)
 
     def _generate_joint_plots(self, df: pd.DataFrame, episode_id: int, include_all: bool) -> dict:
-        """Generate joint plots organized by body part.
+        """Generate joint plots organized by groups.
 
         Returns:
-            Dictionary with 'upper_body' and 'lower_body' HTML strings
+            Dictionary mapping group names to HTML strings.
+            Groups are determined from metadata or default to single group.
         """
         joint_names = self.metadata.get("joint_names", [])
         if not joint_names:
-            return {
-                "upper_body": "<p>No joint metadata available</p>",
-                "lower_body": "<p>No joint metadata available</p>",
-            }
+            return {"default": "<p>No joint metadata available</p>"}
 
-        # Organize joints by body part (using heuristics from joint names)
-        upper_indices, lower_indices = self._get_joint_groups()
+        # Get joint groups (from metadata or fallback to default)
+        joint_groups = self._get_joint_groups()
 
-        # Generate plots for each body part
+        if not joint_groups:
+            return {"default": "<p>No joint groups available</p>"}
+
+        # Generate plots for each group
         plots_html = {}
-        plots_html["upper_body"] = self._generate_body_part_plots(df, upper_indices, "Upper Body", episode_id)
-        plots_html["lower_body"] = self._generate_body_part_plots(df, lower_indices, "Lower Body", episode_id)
+        for group_name, indices in joint_groups.items():
+            display_name = group_name.replace("_", " ").title()
+            plots_html[group_name] = self._generate_body_part_plots(df, indices, display_name, episode_id)
 
         return plots_html
 
-    def _get_joint_groups(self) -> tuple[list[int], list[int]]:
-        """Get joint indices for upper and lower body."""
-        joint_names = self.metadata.get("joint_names", [])
+    def _get_joint_groups(self) -> dict[str, list[int]]:
+        """Get joint groups from metadata or create default grouping.
 
-        # Define patterns for body parts
-        upper_patterns = ["shoulder", "elbow", "wrist", "waist", "hand"]
-        lower_patterns = ["hip", "knee", "ankle"]
+        Returns:
+            Dict mapping group names to lists of joint indices.
+            If metadata has joint_groups, uses those.
+            Otherwise, creates "default" group with all joints.
+        """
+        # Try to get joint groups from metadata
+        joint_groups_meta = self.metadata.get("joint_groups", None)
 
-        upper_indices = []
-        lower_indices = []
+        if joint_groups_meta:
+            # Extract indices from metadata structure
+            joint_groups = {}
+            for group_name, group_data in joint_groups_meta.items():
+                if isinstance(group_data, dict) and "indices" in group_data:
+                    joint_groups[group_name] = group_data["indices"]
+                elif isinstance(group_data, list):
+                    joint_groups[group_name] = group_data
 
-        for idx, name in enumerate(joint_names):
-            name_lower = name.lower()
-            if any(pattern in name_lower for pattern in upper_patterns):
-                upper_indices.append(idx)
-            elif any(pattern in name_lower for pattern in lower_patterns):
-                lower_indices.append(idx)
-            else:
-                # Default to upper if uncertain
-                upper_indices.append(idx)
+            return joint_groups
 
-        return upper_indices, lower_indices
+        # Fallback: Create default group with all joints
+        num_joints = self.metadata.get("num_joints", 0)
+        if num_joints > 0:
+            return {"default": list(range(num_joints))}
+
+        return {}
 
     def _generate_body_part_plots(
         self, df: pd.DataFrame, joint_indices: list[int], body_part: str, episode_id: int
@@ -560,30 +587,41 @@ class TrajectoryReportGenerator:
         return fig.to_html(include_plotlyjs=False)
 
     def _generate_summary_tracking_plot(self, episode_summaries: list[dict]) -> str:
-        """Generate summary plot showing tracking errors across all episodes."""
-        # Create plot showing tracking error distributions
-        errors_data = {"lin_vel_x": [], "lin_vel_y": [], "ang_vel_z": [], "height": [], "status": []}
+        """Generate summary plot showing tracking errors across all episodes (dynamic)."""
+        # Dynamically determine which error fields are available
+        all_error_keys = set()
+        for ep in episode_summaries:
+            if ep.get("tracking_errors"):
+                all_error_keys.update(ep["tracking_errors"].keys())
+
+        if not all_error_keys:
+            return "<p>No tracking data available</p>"
+
+        # Create error data structure for available fields only
+        errors_data = {key: [] for key in all_error_keys}
+        errors_data["status"] = []
 
         for ep in episode_summaries:
-            if ep["tracking_errors"]:
-                for key in ["lin_vel_x", "lin_vel_y", "ang_vel_z", "height"]:
+            if ep.get("tracking_errors"):
+                for key in all_error_keys:
                     if key in ep["tracking_errors"]:
                         errors_data[key].append(ep["tracking_errors"][key]["mean"])
-                        errors_data["status"].append("Success" if ep["is_success"] else "Failed")
-
-        if not errors_data["lin_vel_x"]:
-            return "<p>No tracking data available</p>"
+                errors_data["status"].append("Success" if ep["is_success"] else "Failed")
 
         # Create box plot comparing errors
         fig = go.Figure()
 
-        for key, label in [
-            ("lin_vel_x", "Lin Vel X (m/s)"),
-            ("lin_vel_y", "Lin Vel Y (m/s)"),
-            ("ang_vel_z", "Ang Vel Z (rad/s)"),
-            ("height", "Height (m)"),
-        ]:
+        # Define display labels for common fields
+        field_labels = {
+            "lin_vel_x": "Lin Vel X (m/s)",
+            "lin_vel_y": "Lin Vel Y (m/s)",
+            "ang_vel_z": "Ang Vel Z (rad/s)",
+            "height": "Height (m)",
+        }
+
+        for key in sorted(all_error_keys):
             if errors_data[key]:
+                label = field_labels.get(key, key.replace("_", " ").title())
                 fig.add_trace(go.Box(y=errors_data[key], name=label))
 
         fig.update_layout(
@@ -987,19 +1025,14 @@ EPISODE_HTML_TEMPLATE = """
             💡 Tip: Plots are horizontally scrollable. Use mouse or trackpad to scroll right/left to see all joints.
         </p>
 
-        <details open>
-            <summary>▶ Lower Body Joints</summary>
+        {% for group_name, plot_html in joint_plots.items() %}
+        <details {{'open' if loop.first else ''}}>
+            <summary>▶ {{group_name.replace('_', ' ').title()}} Joints</summary>
             <div class="plot-container">
-                {{joint_plots.lower_body|safe}}
+                {{plot_html|safe}}
             </div>
         </details>
-
-        <details>
-            <summary>▶ Upper Body Joints</summary>
-            <div class="plot-container">
-                {{joint_plots.upper_body|safe}}
-            </div>
-        </details>
+        {% endfor %}
     </section>
 
     <div class="nav" style="text-align: center;">

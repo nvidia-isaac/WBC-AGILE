@@ -165,6 +165,7 @@ class EvalConfig:
     num_envs: int
     episode_length_s: float
     num_episodes: int = 1
+    joint_groups: dict | None = None
     global_overrides: dict = field(default_factory=dict)
     environments: list[EnvConfig] = field(default_factory=list)
     env_overrides: EnvOverrides | None = None
@@ -287,11 +288,15 @@ class EvalConfig:
                 events=event_overrides,
             )
 
+        # Parse joint groups if present
+        joint_groups = eval_data.get("joint_groups", None)
+
         return cls(
             task_name=eval_data["task_name"],
             num_envs=eval_data["num_envs"],
             episode_length_s=eval_data["episode_length_s"],
             num_episodes=eval_data.get("num_episodes", 1),
+            joint_groups=joint_groups,
             global_overrides=eval_data.get("global_overrides", {}),
             environments=environments,
             env_overrides=env_overrides,

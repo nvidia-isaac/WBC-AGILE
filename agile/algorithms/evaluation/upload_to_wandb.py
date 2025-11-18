@@ -38,12 +38,12 @@ import pandas as pd
 # Import plotting utilities for reusing visualization functions
 try:
     from agile.algorithms.evaluation.plotting import (
-        calculate_velocity_height_tracking_errors,
+        calculate_tracking_errors,
         plot_tracking_performance,
     )
 except ImportError:
     # Fallback for standalone usage
-    from plotting import calculate_velocity_height_tracking_errors, plot_tracking_performance
+    from plotting import calculate_tracking_errors, plot_tracking_performance
 
 
 def upload_velocity_height_to_wandb(
@@ -124,7 +124,7 @@ def upload_velocity_height_to_wandb(
                 env_id = df["env_id"].iloc[0] if "env_id" in df.columns else 0
 
                 # Calculate tracking errors for this episode
-                errors = calculate_velocity_height_tracking_errors(df)
+                errors = calculate_tracking_errors(df)
                 if errors:
                     errors_by_env[env_id] = errors
 

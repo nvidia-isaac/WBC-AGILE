@@ -37,6 +37,7 @@ class TrajectoryLogger:
         physics_dt: float,
         env=None,
         fields_to_save: list[str] | None = None,
+        joint_groups: dict | None = None,
         verbose: bool = False,
     ):
         """Initialize trajectory logger.
@@ -48,12 +49,15 @@ class TrajectoryLogger:
             env: Environment instance (optional). If provided, extracts metadata like joint names/limits.
             fields_to_save: List of field names to save. If None, saves all available fields.
                            Example: ["joint_pos", "joint_vel", "root_pos"]
+            joint_groups: Dict mapping group names to joint indices. Saved to metadata for report generation.
+                         Example: {"upper_body": [0,1,2], "lower_body": [3,4,5]}
             verbose: Whether to print detailed logging information
         """
         self.output_dir = Path(output_dir)
         self.trajectories_dir = self.output_dir / "trajectories"
         self.physics_dt = physics_dt
         self.fields_to_save = fields_to_save  # None means save all
+        self.joint_groups = joint_groups
         self.verbose = verbose
 
         # Create output directory
@@ -88,6 +92,16 @@ class TrajectoryLogger:
         joint_pos_limits = robot.data.soft_joint_pos_limits[0].detach().cpu().numpy().tolist()  # [num_joints, 2]
         joint_vel_limits = robot.data.soft_joint_vel_limits[0].detach().cpu().numpy().tolist()  # [num_joints]
 
+        # Serialize joint groups with both indices and names for readability
+        joint_groups_metadata = None
+        if self.joint_groups:
+            joint_groups_metadata = {}
+            for group_name, indices in self.joint_groups.items():
+                joint_groups_metadata[group_name] = {
+                    "indices": indices,
+                    "joint_names": [joint_names[i] for i in indices if i < num_joints],
+                }
+
         # Create metadata dictionary
         metadata = {
             "physics_dt": self.physics_dt,
@@ -97,6 +111,7 @@ class TrajectoryLogger:
             "joint_vel_limits": joint_vel_limits,  # [num_joints] - max absolute velocity
             "max_episode_length": getattr(env, "max_episode_length", None),
             "task_name": getattr(env.cfg, "name", "unknown") if hasattr(env, "cfg") else "unknown",
+            "joint_groups": joint_groups_metadata,  # NEW: Joint group information
         }
 
         # Save to JSON file

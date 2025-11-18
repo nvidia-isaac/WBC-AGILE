@@ -687,3 +687,8 @@ class G1LowerVelocityHistoryEnvCfg(ManagerBasedRLEnvCfg):
         else:
             if self.scene.terrain.terrain_generator is not None:
                 self.scene.terrain.terrain_generator.curriculum = False
+
+    def eval(self):
+        self.observations.eval = mdp.EvaluationObservationsCfg()
+        self.rewards = None
+        self.curriculum = None

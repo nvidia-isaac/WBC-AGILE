@@ -86,13 +86,23 @@ class TestPolicyEvaluator(unittest.TestCase):
 
                 self.observation_manager = ObsManager()
 
-                # Mock robot with find_joints method
+                # Mock robot with find_joints method and joint_names attribute
                 class MockRobot:
+                    def __init__(self):
+                        self.joint_names = ["joint_0", "joint_1", "joint_2"]
+
                     def find_joints(self, patterns: list[str]) -> tuple[list[int], list[str]]:
-                        _ = patterns
-                        # Return a list of joint indices for testing
-                        # First item is the list of indices, second would be list of names
-                        return [[0, 1], ["joint1", "joint2"]]
+                        # Match patterns to joints - simple implementation for testing
+                        matched_indices = []
+                        matched_names = []
+                        for pattern in patterns:
+                            for idx, name in enumerate(self.joint_names):
+                                # Simple matching: exact match or if pattern is in name
+                                if pattern == name or pattern.replace(".*", "") in name:
+                                    if idx not in matched_indices:
+                                        matched_indices.append(idx)
+                                        matched_names.append(name)
+                        return [matched_indices, matched_names]
 
                 # Mock scene dictionary with robot
                 self.scene = {"robot": MockRobot()}
@@ -341,6 +351,32 @@ class TestPolicyEvaluator(unittest.TestCase):
 
         # Shouldn't have called add_frame again since we're already done
         mock_add_frame.assert_not_called()
+
+    def test_build_joint_groups_simplified_format(self):
+        """Test joint groups with simplified format (list of patterns)."""
+        # Test with simplified config format (list of patterns)
+        joint_group_config = {
+            "upper_body": ["joint_0", "joint_1"],
+            "lower_body": ["joint_2"],
+        }
+
+        evaluator = PolicyEvaluator(
+            self.env,
+            task_name="test_task",
+            metrics_path=self.temp_dir,
+            total_envs_target=2,
+            joint_group_config=joint_group_config,
+        )
+
+        # Check that joint groups were built correctly
+        self.assertIn("upper_body", evaluator._joint_groups)
+        self.assertIn("lower_body", evaluator._joint_groups)
+
+        # Upper body should have joints 0 and 1 (joint_0, joint_1)
+        self.assertEqual(evaluator._joint_groups["upper_body"], [0, 1])
+
+        # Lower body should have joint 2 (joint_2)
+        self.assertEqual(evaluator._joint_groups["lower_body"], [2])
 
 
 if __name__ == "__main__":

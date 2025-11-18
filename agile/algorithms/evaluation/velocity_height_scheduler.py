@@ -28,34 +28,39 @@ from agile.algorithms.evaluation.eval_config import EvalConfig, ScheduleStep
 
 
 class VelocityHeightScheduler:
-    """Manages time-based velocity+height command overrides during evaluation.
+    """Manages time-based command overrides during evaluation.
 
-    This scheduler applies deterministic velocity+height commands to specific environments
-    at scheduled times during evaluation episodes.
+    This scheduler applies deterministic commands to specific environments at scheduled
+    times during evaluation episodes. Automatically detects available command fields
+    from the environment configuration.
 
-    **Supported Command Type:** base_velocity only
+    **Supported Command Type:** base_velocity
+        - Velocity-only tasks: lin_vel_x, lin_vel_y, ang_vel_z (3 fields)
+        - Velocity+Height tasks: lin_vel_x, lin_vel_y, ang_vel_z, base_height (4 fields)
+        - Automatically adapts based on task configuration
+
+    **Command Fields:**
         - lin_vel_x: Forward/backward velocity (m/s)
         - lin_vel_y: Lateral velocity (m/s)
         - ang_vel_z: Yaw rate (rad/s)
-        - base_height: Target standing height (m)
+        - base_height: Target standing height (m) [optional, only for height-tracking tasks]
 
     **Not supported:** Other command types (end effector poses, joint positions, etc.)
-        will require a new scheduler implementation. See class docstring for extension ideas.
+        will require extending the scheduler. See class docstring for extension ideas.
 
     Note: Commands must be reapplied after env.step() because the command_manager
     resamples commands during the step, which would overwrite our scheduled values.
     """
 
-    # Required fields for base_velocity commands
-    REQUIRED_COMMAND_FIELDS = ["lin_vel_x", "lin_vel_y", "ang_vel_z", "base_height"]
-
     def __init__(self, env, eval_config: EvalConfig, verbose: bool = True):
-        """Initialize velocity+height scheduler.
+        """Initialize command scheduler.
+
+        Automatically detects command structure from environment (velocity or velocity+height).
 
         Args:
             env: IsaacLab environment instance (may be wrapped)
             eval_config: Evaluation configuration with schedules
-            verbose: Whether to print schedule application info
+            verbose: Whether to print schedule application info and detected command structure
         """
         # Unwrap environment if needed to access command_manager
         self.env = env.unwrapped if hasattr(env, "unwrapped") else env
@@ -86,23 +91,43 @@ class VelocityHeightScheduler:
             self._print_schedule_summary()
 
     def _extract_command_ranges(self) -> dict:
-        """Extract min/max command ranges from environment configuration.
+        """Extract min/max command ranges dynamically from environment configuration.
+
+        Detects available command fields automatically, supporting both:
+        - Velocity-only tasks: lin_vel_x, lin_vel_y, ang_vel_z (3 fields)
+        - Velocity+Height tasks: lin_vel_x, lin_vel_y, ang_vel_z, base_height (4 fields)
 
         Returns:
-            Dictionary with command field ranges
+            Dictionary with command field ranges (only fields that exist in the task)
 
         Raises:
             RuntimeError: If command ranges cannot be extracted from environment config
         """
         try:
             cfg = self.env.cfg.commands.base_velocity.ranges
-            return {
-                "lin_vel_x": (cfg.lin_vel_x[0], cfg.lin_vel_x[1]),
-                "lin_vel_y": (cfg.lin_vel_y[0], cfg.lin_vel_y[1]),
-                "ang_vel_z": (cfg.ang_vel_z[0], cfg.ang_vel_z[1]),
-                "base_height": (cfg.base_height[0], cfg.base_height[1]),
-            }
-        except Exception as e:
+
+            # Dynamically extract all available command fields
+            command_ranges = {}
+
+            # Check for each possible field (exclude 'heading' as it's computed, not directly commanded)
+            possible_fields = ["lin_vel_x", "lin_vel_y", "ang_vel_z", "base_height"]
+
+            for field_name in possible_fields:
+                if hasattr(cfg, field_name):
+                    field_value = getattr(cfg, field_name)
+                    # Check if it's a valid range (tuple/list with 2 elements)
+                    if field_value is not None and isinstance(field_value, tuple | list) and len(field_value) == 2:
+                        command_ranges[field_name] = (field_value[0], field_value[1])
+
+            if not command_ranges:
+                raise RuntimeError("No valid command fields detected from environment config")
+
+            if self.verbose:
+                print(f"[INFO] Detected {len(command_ranges)} command fields: {list(command_ranges.keys())}")
+
+            return command_ranges
+
+        except AttributeError as e:
             raise RuntimeError(
                 f"Failed to extract command ranges from environment config. "
                 f"Ensure the environment has 'cfg.commands.base_velocity.ranges' defined. "
@@ -143,6 +168,8 @@ class VelocityHeightScheduler:
     def _validate_and_clamp_commands(self, commands: dict):
         """Validate command structure and clamp values to allowed ranges.
 
+        Dynamically validates based on fields detected from environment.
+
         Args:
             commands: Command dictionary to validate and modify in-place
         """
@@ -151,13 +178,23 @@ class VelocityHeightScheduler:
 
         cmd = commands["base_velocity"]
 
+        # Get required fields from detected command structure
+        required_fields = list(self.command_ranges.keys())
+
         # Check all required fields present
-        missing = [f for f in self.REQUIRED_COMMAND_FIELDS if f not in cmd]
+        missing = [f for f in required_fields if f not in cmd]
         if missing:
-            raise ValueError(f"Command spec incomplete. Missing: {missing}. Required: {self.REQUIRED_COMMAND_FIELDS}")
+            raise ValueError(
+                f"Command spec incomplete. Missing: {missing}. Required fields for this task: {required_fields}"
+            )
+
+        # Warn about extra fields (not in task but provided in YAML)
+        extra_fields = set(cmd.keys()) - set(required_fields)
+        if extra_fields and self.verbose:
+            print(f"[WARNING] Command contains fields not used by this task: {extra_fields}")
 
         # Clamp to valid ranges
-        for field in self.REQUIRED_COMMAND_FIELDS:
+        for field in required_fields:
             value = cmd[field]
             min_val, max_val = self.command_ranges[field]
 
@@ -194,9 +231,13 @@ class VelocityHeightScheduler:
                 for _i, step in enumerate(schedule[:3]):
                     if step.commands and "base_velocity" in step.commands:
                         cmd = step.commands["base_velocity"]
-                        print(
-                            f"      t={step.time:.1f}s: vel_x={cmd['lin_vel_x']:.2f}, height={cmd['base_height']:.2f}"
-                        )
+                        # Dynamically format all available command fields
+                        cmd_str_parts = []
+                        for field in self.command_ranges.keys():
+                            if field in cmd:
+                                cmd_str_parts.append(f"{field}={cmd[field]:.2f}")
+                        cmd_str = ", ".join(cmd_str_parts)
+                        print(f"      t={step.time:.1f}s: {cmd_str}")
 
         print("=" * 80 + "\n")
 
@@ -283,9 +324,14 @@ class VelocityHeightScheduler:
         """
         cmd = commands["base_velocity"]
 
-        # Create command tensor [4] = [lin_vel_x, lin_vel_y, ang_vel_z, base_height]
+        # Create command tensor dynamically based on available fields
+        # Order matches command_ranges keys (typically: lin_vel_x, lin_vel_y, ang_vel_z, [base_height])
+        command_values = []
+        for field in self.command_ranges.keys():
+            command_values.append(cmd[field])
+
         command_tensor = torch.tensor(
-            [cmd["lin_vel_x"], cmd["lin_vel_y"], cmd["ang_vel_z"], cmd["base_height"]],
+            command_values,
             dtype=torch.float32,
             device=self.device,
         )
@@ -297,19 +343,20 @@ class VelocityHeightScheduler:
         self._set_command(env_id, command_tensor)
 
         if self.verbose:
-            print(
-                f"    Command: lin_vel_x={cmd['lin_vel_x']:.2f}, "
-                f"lin_vel_y={cmd['lin_vel_y']:.2f}, "
-                f"ang_vel_z={cmd['ang_vel_z']:.2f}, "
-                f"base_height={cmd['base_height']:.2f}"
-            )
+            # Dynamically format command fields for printing
+            cmd_str_parts = [f"{field}={cmd[field]:.2f}" for field in self.command_ranges.keys()]
+            cmd_str = ", ".join(cmd_str_parts)
+            print(f"    Command: {cmd_str}")
 
     def _set_command(self, env_id: int, command_tensor: torch.Tensor):
         """Set command for a specific environment.
 
+        Dynamically sets velocity commands (always 3 fields) and height (if available).
+
         Args:
             env_id: Environment ID
-            command_tensor: Command tensor [4] = [lin_vel_x, lin_vel_y, ang_vel_z, base_height]
+            command_tensor: Command tensor with [lin_vel_x, lin_vel_y, ang_vel_z, [base_height]]
+                          Length is 3 for velocity-only, 4 for velocity+height tasks
         """
         cmd_manager = self.env.command_manager
         base_vel_term = cmd_manager.get_term("base_velocity")
@@ -317,11 +364,16 @@ class VelocityHeightScheduler:
         # The 'command' property is read-only (computed from vel_command_b + target_height)
         # We must set the underlying storage directly:
         # - vel_command_b: [lin_vel_x, lin_vel_y, ang_vel_z] (shape: [num_envs, 3])
-        # - target_height: [base_height] (shape: [num_envs])
+        # - target_height: [base_height] (shape: [num_envs]) - only if height commands exist
+
+        # Set velocity commands (always first 3 elements)
         base_vel_term.vel_command_b[env_id, 0] = command_tensor[0]  # lin_vel_x
         base_vel_term.vel_command_b[env_id, 1] = command_tensor[1]  # lin_vel_y
         base_vel_term.vel_command_b[env_id, 2] = command_tensor[2]  # ang_vel_z
-        base_vel_term.target_height[env_id] = command_tensor[3]  # base_height
+
+        # Set height command if available (4th element)
+        if len(command_tensor) >= 4 and hasattr(base_vel_term, "target_height"):
+            base_vel_term.target_height[env_id] = command_tensor[3]  # base_height
 
         # CRITICAL: Disable heading control for scheduled environments
         # When heading_command is enabled, ang_vel_z is computed from a heading target

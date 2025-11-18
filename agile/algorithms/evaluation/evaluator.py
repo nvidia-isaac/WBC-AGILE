@@ -26,10 +26,6 @@ from isaaclab.utils.math import quat_apply_inverse, yaw_quat
 from agile.algorithms.evaluation.episode_buffer import EpisodeBuffer, Frame
 from agile.algorithms.evaluation.motion_metrics_analyzer import MotionMetricsAnalyzer
 from agile.algorithms.evaluation.trajectory_logger import TrajectoryLogger
-from agile.rl_env.assets.robots import unitree_g1
-
-UPPER_BODY_JOINT_NAMES = unitree_g1.WAIST_JOINT_NAMES + unitree_g1.ARM_JOINT_NAMES
-LOWER_BODY_JOINT_NAMES = unitree_g1.LEG_JOINT_NAMES
 
 
 class PolicyEvaluator:
@@ -51,6 +47,7 @@ class PolicyEvaluator:
         verbose: bool = False,
         save_trajectories: bool = False,
         trajectory_fields: list[str] | None = None,
+        joint_group_config: dict | None = None,
     ):
         """Initialize a policy evaluator.
 
@@ -64,6 +61,10 @@ class PolicyEvaluator:
             save_trajectories: Whether to save episode trajectory data to parquet files (default: False)
             trajectory_fields: List of field names to save in trajectories. None = save all.
                               Example: ["joint_pos", "joint_vel", "root_pos"]
+            joint_group_config: Optional dict defining joint groups from eval_config.yaml.
+                              Format: {"upper_body": ["joint1", ".*_shoulder_.*", ...], ...}
+                              Each value is a list of joint names/patterns supporting wildcards.
+                              If None, all joints go to "default" group.
         """
         self._env = env.unwrapped if hasattr(env, "unwrapped") else env
         self._num_envs = self._env.num_envs
@@ -74,8 +75,8 @@ class PolicyEvaluator:
         # Get episode length information
         self._max_episode_len = getattr(env, "max_episode_length", 100)
 
-        # Get joint group information
-        self._joint_groups = self._get_joint_groups_from_env()
+        # Build joint groups from config
+        self._joint_groups = self._build_joint_groups(joint_group_config)
 
         # Initialize metrics calculator
         self._metrics = MotionMetricsAnalyzer(
@@ -103,6 +104,7 @@ class PolicyEvaluator:
                 physics_dt=control_dt,
                 env=self._env,  # Pass environment for metadata extraction
                 fields_to_save=trajectory_fields,
+                joint_groups=self._joint_groups,  # Pass joint groups for metadata
                 verbose=verbose,
             )
 
@@ -137,21 +139,81 @@ class PolicyEvaluator:
                 f"       {self._num_envs} envs × {self._total_envs_target // self._num_envs} episodes = {self._total_envs_target} total"
             )
 
-    def _get_joint_groups_from_env(self) -> dict[str, list[int]]:
-        """Extract joint group information from the environment.
+    def _build_joint_groups(self, joint_group_config: dict | None) -> dict[str, list[int]]:
+        """Build joint groups from configuration.
+
+        Args:
+            joint_group_config: Dict mapping group names to list of joint name patterns.
+                              Each pattern supports wildcards (e.g., ".*_hip_.*", "waist_yaw").
+                              If None, all joints go to "default" group.
 
         Returns:
-            Dictionary mapping group names to lists of joint indices
+            Dictionary mapping group names to lists of joint indices.
+            Always includes groups for assigned joints, plus "default" for any unassigned.
+
+        Example joint_group_config:
+            {"upper_body": ["waist_.*", ".*_shoulder_.*", ".*_elbow.*"],
+             "lower_body": [".*_hip_.*", ".*_knee.*", ".*_ankle.*"]}
         """
-        # Default to empty if not available
+        # Access robot from scene (InteractiveScene is dict-like but doesn't have .get())
+        try:
+            robot = self._env.scene["robot"]
+        except (KeyError, AttributeError, TypeError):
+            if self._verbose:
+                print("[WARNING] No robot in scene, cannot create joint groups")
+            return {}
+
+        all_joint_names = robot.joint_names
+        num_joints = len(all_joint_names)
+
+        if self._verbose:
+            print(f"[INFO] Building joint groups from {num_joints} joints")
+
+        # Track which joints are assigned to groups
+        assigned_joints = set()
         joint_groups = {}
 
-        robot = self._env.scene["robot"]
-        joint_groups = {
-            "upper_joint": robot.find_joints(UPPER_BODY_JOINT_NAMES)[0],
-            "lower_joint": robot.find_joints(LOWER_BODY_JOINT_NAMES)[0],
-            "ankle_joint": robot.find_joints(unitree_g1.ANKLE_JOINT_NAMES)[0],
-        }
+        # If no config provided, use default group with all joints
+        if joint_group_config is None:
+            if self._verbose:
+                print("[INFO] No joint groups specified, using 'default' group with all joints")
+            return {"default": list(range(num_joints))}
+
+        # Process each configured group
+        for group_name, patterns in joint_group_config.items():
+            if not isinstance(patterns, list):
+                if self._verbose:
+                    print(f"[WARNING] Invalid group spec for '{group_name}' (expected list), skipping")
+                continue
+
+            group_indices = []
+
+            # Use robot.find_joints() for pattern matching (supports wildcards)
+            try:
+                matched_indices = robot.find_joints(patterns)[0]
+                for idx in matched_indices:
+                    if idx not in assigned_joints:
+                        group_indices.append(idx)
+                        assigned_joints.add(idx)
+            except Exception as e:
+                if self._verbose:
+                    print(f"[WARNING] Pattern matching failed for group '{group_name}': {e}")
+
+            # Store group if it has any joints
+            if group_indices:
+                joint_groups[group_name] = sorted(group_indices)
+                if self._verbose:
+                    matched_names = [all_joint_names[i] for i in group_indices]
+                    print(f"[INFO] Group '{group_name}': {len(group_indices)} joints - {matched_names}")
+            elif self._verbose:
+                print(f"[WARNING] Joint group '{group_name}' is empty (no matching joints)")
+
+        # Add remaining unassigned joints to "default" group
+        unassigned = [i for i in range(num_joints) if i not in assigned_joints]
+        if unassigned:
+            joint_groups["default"] = unassigned
+            if self._verbose:
+                print(f"[INFO] Group 'default': {len(unassigned)} unassigned joints")
 
         return joint_groups
 
