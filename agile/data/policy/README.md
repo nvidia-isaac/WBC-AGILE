@@ -24,12 +24,14 @@ Training checkpoints that support recurrent policies and batched evaluation.
 
 ## Available Policies
 
-| Policy | Task | Format | Description |
-|--------|------|--------|-------------|
-| `velocity_g1/unitree_g1_velocity_history.pt` | `Velocity-G1-History-v0` | TorchScript | G1 velocity tracking (history-based) |
-| `velocity_height_g1/unitree_g1_velocity_height_teacher.pt` | `Velocity-Height-G1-v0` | TorchScript | G1 teacher with height map |
-| `velocity_height_g1/unitree_g1_velocity_height_recurrent_student.pt` | `Velocity-Height-G1-Distillation-Recurrent-v0` | Checkpoint | G1 recurrent LSTM student |
-| `velocity_t1/booster_t1_velocity_v0.pt` | `Velocity-T1-v0` | TorchScript | T1 velocity tracking (history-based) |
+| Policy | Task | Command | Format | Description |
+|--------|------|--------|--------|-------------|
+| `velocity_g1/unitree_g1_velocity_history.pt` | `Velocity-G1-History-v0` | $\mathrm{v}_x$, $\mathrm{v}_y$, $\omega_z$ |TorchScript | History-based |
+| `velocity_height_g1/unitree_g1_velocity_height_teacher.pt` | `Velocity-Height-G1-v0` | $\mathrm{v}_x$, $\mathrm{v}_y$, $\omega_z$ | TorchScript | Privilged teacher  |
+| `velocity_height_g1/unitree_g1_velocity_height_recurrent_student.pt` | `Velocity-Height-G1-Distillation-Recurrent-v0` | $\mathrm{v}_x$, $\mathrm{v}_y$, $\omega_z$, $h_{root}$|Checkpoint | Recurrent LSTM student |
+| `velocity_t1/booster_t1_velocity_v0.pt` | `Velocity-T1-v0` | $\mathrm{v}_x$, $\mathrm{v}_y$, $\omega_z$, $h_{root}$ | TorchScript | History-based |
+
+Note: Root linear velocity is considered privileged information, as accurate estimation usually requires additional hardware during deployment. Only the velocity height teacher policy accesses this information during training and deployment; all other policies do not rely on it and are suitable for direct deployment on real robots. Additionally, velocity height policies provided are tuned for improved command tracking performance. The velocity height teacher policy is also a nice consideration in just simulation since it observes privileged linear velocity information and will perform better in velocity tracking.
 
 ## Usage
 
@@ -51,4 +53,4 @@ The evaluation script automatically:
 ## Notes
 
 - **Recurrent policies:** Always use checkpoint format for batched evaluation
-- **YAML files:** Required for TorchScript policies, contain task and architecture configs
+- **YAML files:** Required for TorchScript policies deployment in mujoco and real, contain task and architecture configs

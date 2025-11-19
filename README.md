@@ -179,10 +179,11 @@ python scripts/play.py \
     --num_envs 32 \
     --checkpoint <path_to_checkpoint>
 ```
-> We also provide several trained policy in the data/policy folder.
-
+> **💡 Try a pre-trained policy:**
+> We provide a variety of pre-trained policies for different robots and tasks. For a quick start, we recommend trying the G1 recurrent student policy. This policy has better tracking performance comparing to the velocity tracking only policy, does not require linear velocity observations and is ready for direct deployment on real hardware.
 
 > **💡 Next Steps:**
+> - Try [available policies](agile/data/policy/README.md) for different robots and tasks.
 > - Explore [available tasks](#tasks--policy-architecture) for different robots and behaviors
 > - Learn about [teacher-student distillation](#teacher-student-distillation) for robust deployment
 > - See [Evaluation](#evaluation) for performance analysis and metrics
@@ -214,7 +215,6 @@ AGILE uses a modular approach to enable complex loco-manipulation behaviors:
 The framework separates **lower body locomotion** (trained via RL) from **upper body control** (IK/IL/Random), with optional distillation to deployable student policies. This architecture enables flexible behavior composition and efficient training strategies.
 
 **🎯 Teleoperation Integration**: AGILE policies power [Isaac Lab's official teleoperation examples](https://isaac-sim.github.io/IsaacLab/main/source/overview/imitation-learning/teleop_imitation.html#teleoperation). For optimal performance, use the latest policies from this repository—Isaac Lab will be updated with these improved versions soon.
-
 
 > **Note**: This modular architecture represents our current implementation focus for loco-manipulation tasks, particularly enabling **teleoperation** where the upper body responds to external commands while maintaining stable locomotion. AGILE is not limited to this approach—the framework supports various policy architectures including unified full-body control (e.g., stand-up task) and will expand to support additional architectures in future releases.
 
