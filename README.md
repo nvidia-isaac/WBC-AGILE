@@ -4,34 +4,45 @@
 
 **AGILE** provides a comprehensive reinforcement learning framework for training whole-body control policies with validated sim-to-real transfer capabilities. Built on NVIDIA Isaac Lab, this toolkit enables researchers and practitioners to develop loco-manipulation behaviors for humanoid robots.
 
-<details open>
+<p align="center">
+  <!-- Row 1 -->
+  <span style="display:inline-block; text-align:center; margin:0px;">
+    <img src="docs/videos/booster_t1_stand_up_sim2sim.gif" width="240">
+  </span>
+  <span style="display:inline-block; text-align:center; margin:0px;">
+    <img src="docs/videos/booster_t1_vel_sim2sim.gif" width="240">
+  </span>
+  <span style="display:inline-block; text-align:center; margin:0px;">
+    <img src="docs/videos/booster_t1_vel_sim2real.gif" width="240">
+  </span>
+  <br>
+  <!-- Row 2 -->
+  <span style="display:inline-block; text-align:center; margin:0px;">
+    <img src="docs/videos/unitree_g1_vel_height_sim2sim.gif" width="240">
+  </span>
+  <span style="display:inline-block; text-align:center; margin:0px;">
+    <img src="docs/videos/unitree_g1_vel_height_sim2real.gif" width="240">
+  </span>
+  <span style="display:inline-block; text-align:center; margin:0px;">
+    <img src="docs/videos/unitree_g1_teleop.gif" width="240">
+  </span>
+</p>
+
+<p align="center">
+  <em><strong>Top row:</strong> Booster T1 – stand-up recovery (sim-to-sim), velocity tracking (sim-to-sim), velocity tracking (sim-to-real).<br>
+  <strong>Bottom row:</strong> Unitree G1 – velocity-height tracking (sim-to-sim), velocity-height tracking (sim-to-real), teleoperation with trained policy.</em>
+</p>
+
+<details>
 
 <summary> Key Features </summary>
 
 ### Key Features
 
-**🤖 Robot Support & Validated Tasks**
-- **Multi-robot embodiments**: Unitree G1 and Booster T1
-- **Multiple tasks**: Different task settings, including velocity tracking, height tracking, and stand-up recovery to provide comprehensive examples for environment setup.
-- **Sim-to-Real validated**: Proven transfer for both G1 and T1 robots in real-world deployment
-
-
-**🛠️ Development & Debugging Tools**
-- **Debug environment**: Rapid prototyping task to verify joint configurations, rewards, symmetry, and robot setup
-- **Isaac Lab manager-based architecture**: Modular environment design for easy customization
-- **Extensive MDP library**: Delayed actuator models, terrain generation, [random action generator](agile/rl_env/mdp/actions/velocity_profiles/README.md), reward functions, and more
-- **I/O export**: Export the entire task setup as a YAML file for quick deployment (see [scripts/README.md](agile/scripts/README.md))
-
-**📊 Training Infrastructure**
-- **Enhanced RSL-RL**: Extended with TensorDict support, entropy annealing, symmetry losses, and teacher-student distillation (see [MODIFICATIONS](agile/algorithms/rsl_rl/MODIFICATIONS.md))
-- **W&B (Weights & Biases) integration**: Hyperparameter sweeps and experiment tracking with automatic Git commit logging
-- **Adaptive curriculum**: Harness force simulation with progressive difficulty
-- **Teacher-student distillation**: Train robust policies with privileged information, then distill to deployable student policies
-
-**📈 Evaluation & Analysis**
-- **Deterministic evaluation**: Evaluation wrapper to run the environment deterministically
-- **Trajectory saving**: Export data for detailed offline analysis
-- **Automated report generation**: HTML reports with performance metrics and trajectory analysis
+<p align="center">
+  <img src="docs/figures/agile_highlights.png" alt="AGILE Highlights" width="90%">
+</p>
+<p align="center"><em>Figure: AGILE highlights and key features.</em></p>
 
 </details>
 
@@ -70,7 +81,7 @@ agile/                       # Repository root
 │   │   └── setup_hooks.sh            # Set up git hooks
 │   ├── wandb_sweep/         # Hyperparameter optimization with W&B
 ├── tests/                   # Test suite
-├── workflows/               # Support workflows such as Dockerfile
+├── workflows/               # Support workflow such as docker file
 ├── pyproject.toml           # Project configuration
 ├── CONTRIBUTING.md          # Contribution guidelines
 └── README.md                # Project documentation
@@ -78,7 +89,6 @@ agile/                       # Repository root
 </details>
 
 ## Table of Contents
-- [Demos](#demos)
 - [Installation](#installation)
   - [Prerequisites](#prerequisites)
   - [Local Development Setup](#local-development-setup)
@@ -101,37 +111,6 @@ agile/                       # Repository root
 - [License](#license)
 - [Core Contributors](#core-contributors)
 - [Acknowledgments](#acknowledgments)
-
-## Demos
-
-<p align="center">
-  <!-- Row 1 -->
-  <span style="display:inline-block; text-align:center; margin:0px;">
-    <img src="docs/videos/booster_t1_stand_up_sim2sim.gif" width="240">
-  </span>
-  <span style="display:inline-block; text-align:center; margin:0px;">
-    <img src="docs/videos/booster_t1_vel_sim2sim.gif" width="240">
-  </span>
-  <span style="display:inline-block; text-align:center; margin:0px;">
-    <img src="docs/videos/booster_t1_vel_sim2real.gif" width="240">
-  </span>
-  <br>
-  <!-- Row 2 -->
-  <span style="display:inline-block; text-align:center; margin:0px;">
-    <img src="docs/videos/unitree_g1_vel_height_sim2sim.gif" width="240">
-  </span>
-  <span style="display:inline-block; text-align:center; margin:0px;">
-    <img src="docs/videos/unitree_g1_vel_height_sim2real.gif" width="240">
-  </span>
-  <span style="display:inline-block; text-align:center; margin:0px;">
-    <img src="docs/videos/unitree_g1_teleop.gif" width="240">
-  </span>
-</p>
-
-<p align="center">
-  <em><strong>Top row:</strong> Booster T1 – stand-up recovery (sim-to-sim), velocity tracking (sim-to-sim), velocity tracking (sim-to-real).<br>
-  <strong>Bottom row:</strong> Unitree G1 – velocity-height tracking (sim-to-sim), velocity-height tracking (sim-to-real), teleoperation with trained policy.</em>
-</p>
 
 
 ## Installation
@@ -200,6 +179,7 @@ python scripts/play.py \
     --num_envs 32 \
     --checkpoint <path_to_checkpoint>
 ```
+> We also provide several trained policy in the data/policy folder.
 
 
 > **💡 Next Steps:**
@@ -234,6 +214,7 @@ AGILE uses a modular approach to enable complex loco-manipulation behaviors:
 The framework separates **lower body locomotion** (trained via RL) from **upper body control** (IK/IL/Random), with optional distillation to deployable student policies. This architecture enables flexible behavior composition and efficient training strategies.
 
 **🎯 Teleoperation Integration**: AGILE policies power [Isaac Lab's official teleoperation examples](https://isaac-sim.github.io/IsaacLab/main/source/overview/imitation-learning/teleop_imitation.html#teleoperation). For optimal performance, use the latest policies from this repository—Isaac Lab will be updated with these improved versions soon.
+
 
 > **Note**: This modular architecture represents our current implementation focus for loco-manipulation tasks, particularly enabling **teleoperation** where the upper body responds to external commands while maintaining stable locomotion. AGILE is not limited to this approach—the framework supports various policy architectures including unified full-body control (e.g., stand-up task) and will expand to support additional architectures in future releases.
 
@@ -487,3 +468,16 @@ We would like to acknowledge the following projects from which parts of the code
 - [Beyond Mimic](https://github.com/HybridRobotics/whole_body_tracking)
 - [RSL_RL](https://github.com/leggedrobotics/rsl_rl)
 - [Isaac Lab](https://github.com/isaac-sim/IsaacLab)
+
+## Citation
+If you use AGILE in your research, please cite:
+
+```bibtex
+@misc{agile2025,
+  title        = {AGILE: A Generic Isaac-Lab based Engine for Humanoid Loco-Manipulation Learning},
+  author       = {Zhao, Huihua and Cathomen, Rafael and Gulich, Lionel and Ongan, Efe Arda and Lin, Michael and Jain, Shalin and Liu, Wei and Kulkarni, Vishal and Pouya, Soha and Chang, Yan},
+  year         = {2025},
+  note         = {Version compatible with Isaac Lab 2.3; accessed 2025-11-19},
+  url          = {https://github.com/nvidia-isaac/WBC_AGILE/tree/main}
+}
+```
