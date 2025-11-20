@@ -15,7 +15,6 @@
 
 
 import math
-import pathlib
 from dataclasses import MISSING
 
 import isaaclab.sim as sim_utils
@@ -39,9 +38,6 @@ from agile.rl_env import mdp
 from agile.rl_env.assets.robots.booster_t1 import T1_DELAYED_DC_CFG
 from agile.rl_env.assets.robots.unitree_g1 import G1_29DOF_DELAYED_DC_MOTOR
 from agile.rl_env.mdp.terrains import ROUGH_TERRAIN_CFG  # noqa: F401, F403
-
-FILE_DIR = pathlib.Path(__file__).parent
-REPO_DIR = FILE_DIR.parent.parent.parent
 
 
 @configclass
@@ -174,6 +170,8 @@ class ViewerCfg:
     resolution: tuple[int, int] = (1280, 720)
 
     origin_type = "world"
+
+    asset_name: str | None = None
 
     env_index: int = 0
 

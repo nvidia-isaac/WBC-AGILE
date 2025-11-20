@@ -148,6 +148,11 @@ The two robots are present to verify symmetry functions: actions are mirrored th
 | `Debug-G1-v0` | Debug environment for Unitree G1 |
 | `Debug-T1-v0` | Debug environment for Booster T1 |
 
+To run the debug env, run
+```bash
+python scripts/play.py --task Debug-G1-v0
+```
+
 ## Adding New Tasks
 
 To create a new task:
