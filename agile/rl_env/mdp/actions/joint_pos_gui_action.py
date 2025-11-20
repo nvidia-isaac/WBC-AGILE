@@ -57,13 +57,26 @@ class JointPositionGUIAction(JointPositionAction):
         # Helper to safely slice/select joints on tensors living on either CPU or GPU
         # (defined below __init__).
         self._desired_pos = self._select_joints(self._asset.data.joint_pos).clone()
+
         # Desired PD gains for the robot actuators
-        self._desired_stiffness = self._select_joints(
-            torch.cat([v.stiffness for v in self._asset.actuators.values()], dim=-1)
-        ).clone()
-        self._desired_damping = self._select_joints(
-            torch.cat([v.damping for v in self._asset.actuators.values()], dim=-1)
-        ).clone()
+        # IMPORTANT: We need to build the gains in the correct joint order, not actuator order
+        # Build full gains tensor for all joints, then select the subset we need
+        num_all_joints = self._asset.num_joints
+        full_stiffness = torch.zeros(self.num_envs, num_all_joints, device=self.device)
+        full_damping = torch.zeros(self.num_envs, num_all_joints, device=self.device)
+
+        # Populate gains from each actuator in the correct joint positions
+        for actuator in self._asset.actuators.values():
+            # Get the joint IDs controlled by this actuator
+            actuator_joint_ids = self._asset.find_joints(actuator.joint_names)[0]
+            # Copy the gains to the correct positions
+            full_stiffness[:, actuator_joint_ids] = actuator.stiffness
+            full_damping[:, actuator_joint_ids] = actuator.damping
+
+        # Now select only the joints we care about for this action term
+        self._desired_stiffness = self._select_joints(full_stiffness).clone()
+        self._desired_damping = self._select_joints(full_damping).clone()
+
         # Store default gains for reset
         self._default_stiffness = self._desired_stiffness.clone()
         self._default_damping = self._desired_damping.clone()

@@ -9,18 +9,23 @@ Main training script for RL agents using RSL-RL. Supports distributed training, 
 
 Example usage:
 ```bash
-python scripts/train.py --task Velocity-T1-v0 --num_envs 2048 --video --video_interval_iter 500 --headless --logger wandb
+python scripts/train.py --task Velocity-T1-v0 --num_envs 4096 --video --video_interval_iter 500 --headless --logger wandb
 ```
 
 ### `eval.py`
-Evaluation script for trained RL agents. Loads checkpoints and evaluates agent performance, typically used for quantitative analysis and benchmarking without visualization.
-
-### `play.py`
-Interactive playback script for visualizing trained RL agents. Loads checkpoints and runs the policy in the simulation environment with rendering enabled for qualitative analysis.
+Evaluation script for trained RL agents. Loads checkpoints, evaluates agent performance, and automatically exports policies to TorchScript and ONNX formats. Used for quantitative analysis, benchmarking, and policy export for deployment.
 
 Example usage:
 ```bash
-python scripts/play.py --task Velocity-T1-v0 --num_envs 32 --resume RESUME --load_run run_to_load
+python scripts/eval.py --task Velocity-T1-v0 --num_envs 32 --checkpoint path/to/checkpoint.pt
+```
+
+### `play.py`
+Environment validation script that runs environments with sinusoidal test actions (no policy required). Useful for debugging environment configurations, testing new robots, and validating MDP components.
+
+Example usage:
+```bash
+python scripts/play.py --task Velocity-T1-v0 --num_envs 32
 ```
 
 ## Utility Scripts

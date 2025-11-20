@@ -70,8 +70,8 @@ agile/                       # Repository root
 │   └── videos/              # Demo videos (tracked with Git LFS)
 ├── scripts/                 # Utility scripts
 │   ├── train.py             # Training script
-│   ├── eval.py              # Evaluation script
-│   ├── play.py              # Interactive play script
+│   ├── eval.py              # Evaluation and policy export script
+│   ├── play.py              # Environment validation script (no policy)
 │   ├── verify_rsl_rl.py     # Verify RSL-RL installation
 │   ├── export_IODescriptors.py # Export I/O descriptors
 │   ├── setup/               # Installation and setup scripts
@@ -173,8 +173,8 @@ python scripts/train.py \
 **2. Visualize the trained policy:**
 
 ```bash
-# After training completes, visualize the policy
-python scripts/play.py \
+# After training completes, visualize and evaluate the policy
+python scripts/eval.py \
     --task Velocity-T1-v0 \
     --num_envs 32 \
     --checkpoint <path_to_checkpoint>
@@ -240,6 +240,16 @@ This project supports multiple tasks across different robot embodiments (G1 and 
 
 
 
+</details>
+
+<details>
+<summary> Play </summary>
+
+### Play
+After building a task, we suggest validating the task including scene, action, MDP functions etc before training. For environment validation without a policy (using sinusoidal test actions), use `scripts/play.py`:
+```bash
+python scripts/play.py --task Velocity-T1-v0 --num_envs 2
+```
 </details>
 
 <details>
@@ -322,7 +332,7 @@ Deploy a W&B sweep for hyperparameter optimization, see [scripts/wandb_sweep/REA
 
 ### Evaluation
 
-Evaluate trained policies with deterministic scenarios and report generation:
+To visualzie and export a trained policy, use the `scritps/eval.py`. This script can also be used for evaluation with deterministic scenarios and report generation:
 
 ```bash
 python scripts/eval.py \
@@ -333,17 +343,6 @@ python scripts/eval.py \
 ```
 
 Additional evaluation options include `--save_trajectories` to save trajectory data for analysis, `--generate_report` to generate HTML evaluation reports, `--eval_config` to use deterministic evaluation scenarios, and more. Run with `--run_evaluation` to enable the full evaluation pipeline. See [agile/algorithms/evaluation/README.md](agile/algorithms/evaluation/README.md) for detailed configurations.
-</details>
-
-<details>
-<summary> Play </summary>
-
-### Play
-To play and export a trained policy, use the `scripts/play.py` script, e.g.,:
-```bash
-python scripts/play.py --num_envs 32 --task Velocity-Height-G1-v0 --resume RESUME --load_run 2025-01-01_00-00-0_task_name
-```
-Use the `resume` and `load_run` flags to select the run to export. This saves the exported policy (ONNX and TorchScript) in the `exported/` directory. You can also provide a `checkpoint` path directly.
 </details>
 
 <details>
@@ -440,6 +439,8 @@ Please see [CONTRIBUTING.md](CONTRIBUTING.md) for detailed information on how to
 
 ## License
 
+<details>
+<summary> License Information</summary>
 This repository contains code under two different open-source licenses:
 
 ### BSD 3-Clause License
@@ -459,6 +460,8 @@ When using or distributing this software, you must comply with both licenses as 
 - For all other code, comply with the Apache 2.0 License terms
 
 For complete license information and full terms, see the [LICENCE](LICENCE) file at the root of this repository.
+
+</details>
 
 ## Core Contributors
 Huihua Zhao, Rafael Cathomen, Lionel Gulich, Efe Arda Ongan, Michael Lin, Shalin Jain, Wei Liu, Vishal Kulkarni, Soha Pouya, Yan Chang
