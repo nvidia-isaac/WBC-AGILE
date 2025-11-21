@@ -40,6 +40,8 @@ dependencies = [
     # Extra dependencies (requirements-extras.txt)
     "datasets==2.19.0",
     "dearpygui==2.1.0",
+    # Sim2Mujoco dependencies
+    "mujoco>=3.3.6",
 ]
 
 [project.optional-dependencies]

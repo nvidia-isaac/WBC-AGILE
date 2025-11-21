@@ -161,7 +161,7 @@ def main() -> None:
 
     # Get action space dimensions
     num_envs = env.unwrapped.num_envs
-    action_dim = int(np.prod(env.action_space.shape))
+    action_dim = env.unwrapped.action_manager.total_action_dim
 
     print(f"[INFO] Environment loaded: {args_cli.task}")
     print(f"[INFO] Number of environments: {num_envs}")

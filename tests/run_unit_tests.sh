@@ -97,6 +97,7 @@ fi
 # Define fixed list of test files to exclude (E2E tests)
 ALWAYS_EXCLUDE=(
     "tests/test_all_tasks_e2e.py"
+    "tests/test_sim2mujoco_e2e.py"
 )
 
 # Combine the fixed exclusion list with command-line exclusions

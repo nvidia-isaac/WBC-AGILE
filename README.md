@@ -346,6 +346,30 @@ Additional evaluation options include `--save_trajectories` to save trajectory d
 </details>
 
 <details>
+<summary> Sim to MuJoCo </summary>
+
+### Sim to MuJoCo
+
+We provide a **generic Sim2MuJoCo framework** that enables seamless policy transfer from Isaac Lab to MuJoCo simulation. The framework is task-agnostic and automatically handles observation/action mapping by parsing the exported I/O descriptor YAML file—no code changes needed for different tasks.
+
+**Quick Start:**
+
+1. Export policy and I/O descriptor from your trained checkpoint
+2. Get robot MJCF from [Unitree's official repository](https://github.com/unitreerobotics/unitree_mujoco) or bring your own
+3. Run evaluation in MuJoCo
+
+```bash
+python scripts/sim2mujoco_eval.py \
+  --checkpoint path/to/policy.pt \
+  --config path/to/config.yaml \
+  --mjcf unitree_mujoco/unitree_robots/g1/scene_29dof.xml
+```
+
+For detailed instructions on exporting policies and I/O descriptors, see [scripts/README.md](scripts/README.md#sim2mujoco_evalpy).
+
+</details>
+
+<details>
 <summary> Testing </summary>
 
 ### Testing
@@ -404,7 +428,7 @@ Note: The `third_party` directory is excluded from all pre-commit hooks to prese
 </details>
 
 ## Deployment
-Policy deployment for both sim-to-sim and sim-to-real transfer currently utilizes NVIDIA's internal deployment framework, which is planned for public release in the near future.
+Policy deployment for sim-to-real transfer currently utilizes NVIDIA's internal deployment framework, which is planned for public release in the near future.
 
 **Pre-trained Policies:** We include several verified pre-trained checkpoints in the repository for evaluation and deployment. See [`agile/data/policy/README.md`](agile/data/policy/README.md) for available policies and usage instructions.
 

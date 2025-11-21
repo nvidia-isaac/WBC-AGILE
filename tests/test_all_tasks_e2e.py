@@ -348,6 +348,62 @@ class TestAllTasks(unittest.TestCase):
         else:
             print("\n✅ All evaluation tests passed!")
 
+    def test_play_script(self):
+        """Smoke test for scripts/play.py using a single environment."""
+        play_script = os.path.join(self.project_root, "scripts", "play.py")
+        if not os.path.exists(play_script):
+            self.skipTest(f"Play script not found at {play_script}")
+
+        task = "Velocity-G1-History-v0"
+        num_envs = 2
+
+        cmd = [
+            self.isaaclab_script,
+            "-p",
+            play_script,
+            "--task",
+            task,
+            "--num_envs",
+            str(num_envs),
+            "--video",
+            "--video_length",
+            "10",
+            "--headless",
+        ]
+
+        env = dict(os.environ)
+        env["WANDB_MODE"] = "disabled"
+        env["OMNI_HEADLESS"] = "1"
+        env["DISPLAY"] = ":1"
+
+        print(f"\n{'=' * 60}", flush=True)
+        print(f"Testing play script: {task}", flush=True)
+        print("=" * 60, flush=True)
+        print(f"Command: {' '.join(cmd)}", flush=True)
+
+        try:
+            subprocess.run(
+                cmd,
+                check=True,
+                timeout=120,
+                capture_output=True,
+                text=True,
+                env=env,
+            )
+            print(f"✅ Play script for {task} passed", flush=True)
+        except subprocess.CalledProcessError as e:
+            print(f"❌ Play script failed for {task}", flush=True)
+            print("STDOUT:", flush=True)
+            print(e.stdout[-2000:] if e.stdout else "No stdout", flush=True)
+            print("STDERR:", flush=True)
+            print(e.stderr[-2000:] if e.stderr else "No stderr", flush=True)
+            self.fail(f"Play script failed for {task}")
+        except subprocess.TimeoutExpired as e:
+            print(f"❌ Play script timed out for {task}", flush=True)
+            print("Partial STDOUT:", flush=True)
+            print(e.stdout[-2000:] if e.stdout else "No output", flush=True)
+            self.fail(f"Play script timed out for {task}")
+
 
 if __name__ == "__main__":
     # Run the tests

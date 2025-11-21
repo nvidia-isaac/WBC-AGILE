@@ -28,6 +28,46 @@ Example usage:
 python scripts/play.py --task Velocity-T1-v0 --num_envs 32
 ```
 
+### `sim2mujoco_eval.py`
+Evaluation script for Sim2Sim transfer to MuJoCo. Runs trained policies in MuJoCo simulation to verify transfer performance before real hardware deployment. This is a **generic framework** that works with any task by automatically parsing the I/O descriptor YAML file.
+
+Example usage:
+```bash
+python scripts/sim2mujoco_eval.py --checkpoint path/to/policy.pt --config path/to/config.yaml --mjcf path/to/robot.xml
+```
+
+**Quick Start Tutorial:**
+
+1. **Export Policy to TorchScript:**
+   ```bash
+   python scripts/eval.py --task Velocity-G1-History-v0 --checkpoint path/to/checkpoint.pt
+   # This automatically exports policy.pt in the checkpoint directory's exported/ folder
+   ```
+
+2. **Export I/O Descriptors:**
+   ```bash
+   python scripts/export_IODescriptors.py --task Velocity-G1-History-v0 --output_dir path/to/output
+   # Generates a YAML file describing observation/action spaces
+   ```
+
+3. **Get Robot MJCF:**
+   We recommend using official robot models from [Unitree's MuJoCo repository](https://github.com/unitreerobotics/unitree_mujoco):
+   ```bash
+   git clone https://github.com/unitreerobotics/unitree_mujoco.git
+   # G1 robot: unitree_mujoco/unitree_robots/g1/g1_29dof.xml
+   ```
+
+4. **Run Sim2MuJoCo Evaluation:**
+   ```bash
+   python scripts/sim2mujoco_eval.py \
+     --checkpoint path/to/policy.pt \
+     --config path/to/config.yaml \
+     --mjcf unitree_mujoco/unitree_robots/g1/scene_29dof.xml \
+     --duration 10.0
+   ```
+
+> **💡 Interactive Control:** The sim2mujoco module supports keyboard teleoperation. Use arrow keys (↑↓←→) or I/J/K/L for movement, U/O for turning, and Page Up/Down (or 9/0) for height control. Press SPACE to stop. Remove `--no-viewer` flag to enable the interactive viewer.
+
 ## Utility Scripts
 
 
