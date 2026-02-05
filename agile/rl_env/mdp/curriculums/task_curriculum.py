@@ -254,6 +254,88 @@ def remove_harness(
         return scale  # type: ignore
 
 
+class update_event_range_step(ManagerTermBase):
+    """Curriculum to update event parameter ranges given the iteration.
+
+    This curriculum linearly interpolates between start and terminal ranges
+    based on training steps, useful for gradually increasing randomization
+    like object pose ranges.
+    """
+
+    def __init__(self, cfg: EventTermCfg, env: ManagerBasedRLEnv):
+        super().__init__(cfg, env)
+        self.event_term: str = cfg.params["event_term"]
+        self.param_name: str = cfg.params["param_name"]
+
+        # Get the original parameter structure (could be dict of tuples)
+        self.original_param = env.event_manager.get_term_cfg(self.event_term).params[self.param_name]
+
+        # Store start and terminal ranges
+        self.start_range: dict[str, tuple[float, float]] = cfg.params["start_range"]
+        self.terminal_range: dict[str, tuple[float, float]] = cfg.params["terminal_range"]
+
+        # Set initial range
+        self._update_range(env, 0.0)
+
+    def _interpolate_range(
+        self, start: tuple[float, float], terminal: tuple[float, float], scale: float
+    ) -> tuple[float, float]:
+        """Linearly interpolate between start and terminal range."""
+        return (
+            start[0] + (terminal[0] - start[0]) * scale,
+            start[1] + (terminal[1] - start[1]) * scale,
+        )
+
+    def _update_range(self, env: ManagerBasedRLEnv, scale: float) -> dict:
+        """Update the event parameter with interpolated ranges."""
+        new_range = {}
+        for key in self.original_param:
+            if key in self.start_range and key in self.terminal_range:
+                new_range[key] = self._interpolate_range(self.start_range[key], self.terminal_range[key], scale)
+            else:
+                # Keep original value for keys not specified
+                new_range[key] = self.original_param[key]
+
+        env.event_manager.get_term_cfg(self.event_term).params[self.param_name] = new_range
+        return new_range
+
+    def __call__(
+        self,
+        env: ManagerBasedRLEnv,
+        env_ids: Sequence[int],  # noqa: ARG002
+        event_term: str,  # noqa: ARG002
+        param_name: str,  # noqa: ARG002
+        start_range: dict[str, tuple[float, float]],  # noqa: ARG002
+        terminal_range: dict[str, tuple[float, float]],  # noqa: ARG002
+        start_step: int,
+        num_steps: int,
+    ) -> float:
+        """Update event parameter range linearly over training steps.
+
+        Args:
+            env: The learning environment.
+            env_ids: Not used since all environments are affected.
+            event_term: Name of the event term to update.
+            param_name: Name of the parameter to update (e.g., "pose_range").
+            start_range: Starting range dict (e.g., {"x": (-0.01, 0.01), "y": (-0.01, 0.01)}).
+            terminal_range: Terminal range dict (e.g., {"x": (-0.1, 0.1), "y": (-0.1, 0.1)}).
+            start_step: When to start updating.
+            num_steps: How long to update.
+
+        Returns:
+            Current interpolation scale (0.0 to 1.0).
+        """
+        if env.common_step_counter <= start_step:
+            return 0.0
+        elif env.common_step_counter > start_step + num_steps:
+            self._update_range(env, 1.0)
+            return 1.0
+        else:
+            scale: float = (env.common_step_counter - start_step) / num_steps
+            self._update_range(env, scale)
+            return scale
+
+
 class update_reward_weight_step(ManagerTermBase):
     """Curriculum to update reward weights given the iteration."""
 

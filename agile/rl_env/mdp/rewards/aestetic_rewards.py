@@ -32,8 +32,23 @@ from agile.rl_env.mdp.utils import (
 from agile.rl_env.utils import math_utils as agile_math_utils
 
 
-class root_acc_l2(ManagerTermBase):
-    """Penalize base linear and angular accelerations using velocity history tracking (Isaac Gym style)."""
+class body_acc_l2(ManagerTermBase):
+    """Penalize body linear and angular accelerations using velocity history tracking (Isaac Gym style).
+
+    This reward term computes world-frame accelerations for a specified body/link.
+    If no body_names is specified in asset_cfg, it defaults to using the root link.
+
+    Usage:
+        # For root acceleration (default):
+        body_acc = RewTerm(func=body_acc_l2, weight=-0.01)
+
+        # For a specific link:
+        torso_acc = RewTerm(
+            func=body_acc_l2,
+            weight=-0.01,
+            params={"asset_cfg": SceneEntityCfg("robot", body_names=["torso_link"])},
+        )
+    """
 
     def __init__(self, cfg: RewardTermCfg, env: ManagerBasedRLEnv):
         # Initialize the base class
@@ -41,42 +56,99 @@ class root_acc_l2(ManagerTermBase):
 
         # Initialize velocity history buffer
         # Shape: [num_envs, 6] where 6 = 3 (lin_vel) + 3 (ang_vel)
-        self.prev_root_vel = torch.zeros(env.num_envs, 6, device=env.device, dtype=torch.float32)
+        self.prev_body_vel = torch.zeros(env.num_envs, 6, device=env.device, dtype=torch.float32)
 
         # Flag to track if this is the first call (skip acceleration computation)
         self.first_call = True
+
+        # Resolve body index if body_names is provided
+        self._body_idx: int | None = None
+        asset_cfg: SceneEntityCfg = cfg.params.get("asset_cfg", SceneEntityCfg("robot"))
+        if asset_cfg.body_names is not None:
+            asset: Articulation = env.scene[asset_cfg.name]
+            self._body_idx = asset.find_bodies(asset_cfg.body_names)[0][0]
 
     def __call__(
         self,
         env: ManagerBasedRLEnv,
         asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
     ) -> torch.Tensor:
-        """Compute root acceleration penalty by tracking velocity changes."""
+        """Compute body acceleration penalty by tracking velocity changes in world frame."""
 
         # Extract the robot asset
-        robot = env.scene[asset_cfg.name]
+        robot: Articulation = env.scene[asset_cfg.name]
 
-        # Get current root velocities (both linear and angular)
-        current_lin_vel = robot.data.root_lin_vel_w  # [num_envs, 3]
-        current_ang_vel = robot.data.root_ang_vel_w  # [num_envs, 3]
+        # Get current velocities (both linear and angular) in world frame
+        if self._body_idx is not None:
+            # Use specified body velocities
+            current_lin_vel = robot.data.body_lin_vel_w[:, self._body_idx, :]  # [num_envs, 3]
+            current_ang_vel = robot.data.body_ang_vel_w[:, self._body_idx, :]  # [num_envs, 3]
+        else:
+            # Default to root velocities
+            current_lin_vel = robot.data.root_lin_vel_w  # [num_envs, 3]
+            current_ang_vel = robot.data.root_ang_vel_w  # [num_envs, 3]
 
         # Concatenate to form 6D velocity vector
-        current_root_vel = torch.cat([current_lin_vel, current_ang_vel], dim=-1)  # [num_envs, 6]
+        current_body_vel = torch.cat([current_lin_vel, current_ang_vel], dim=-1)  # [num_envs, 6]
 
         if self.first_call:
             # First call: initialize previous velocity and return zeros
-            self.prev_root_vel.copy_(current_root_vel)
+            self.prev_body_vel.copy_(current_body_vel)
             self.first_call = False
             return torch.zeros(env.num_envs, device=env.device)
 
         # Compute acceleration as velocity difference over timestep
-        root_acc = (current_root_vel - self.prev_root_vel) / env.step_dt
+        body_acc = (current_body_vel - self.prev_body_vel) / env.step_dt
 
         # Update velocity history for next call
-        self.prev_root_vel.copy_(current_root_vel)
+        self.prev_body_vel.copy_(current_body_vel)
 
         # Compute L2 penalty on accelerations (sum of squared accelerations)
-        return torch.sum(torch.square(root_acc), dim=-1)
+        return torch.sum(torch.square(body_acc), dim=-1)
+
+
+def body_ang_vel_l2(
+    env: ManagerBasedRLEnv,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> torch.Tensor:
+    """Penalize body angular velocity using L2 norm.
+
+    This reward penalizes high angular velocities of a specified body/link,
+    useful for reducing shaking/oscillations without affecting linear motion.
+    If no body_names is specified in asset_cfg, defaults to using the root link.
+
+    Usage:
+        # For root angular velocity:
+        root_ang_vel = RewTerm(func=body_ang_vel_l2, weight=-0.01)
+
+        # For a specific link (e.g., torso):
+        torso_ang_vel = RewTerm(
+            func=body_ang_vel_l2,
+            weight=-0.01,
+            params={"asset_cfg": SceneEntityCfg("robot", body_names=["torso_link"])},
+        )
+
+    Args:
+        env: The environment.
+        asset_cfg: Asset configuration. Use body_names to specify a link, otherwise uses root.
+
+    Returns:
+        L2 norm of the body's angular velocity (sum of squared components).
+    """
+    # Extract the robot asset
+    robot: Articulation = env.scene[asset_cfg.name]
+
+    # Get angular velocity based on whether body_names is specified
+    if asset_cfg.body_ids is not None and len(asset_cfg.body_ids) > 0:
+        # Use specified body angular velocity
+        body_idx = asset_cfg.body_ids[0]
+        ang_vel = robot.data.body_ang_vel_w[:, body_idx, :]  # [num_envs, 3]
+    else:
+        # Default to root angular velocity
+        ang_vel = robot.data.root_ang_vel_w  # [num_envs, 3]
+
+    # Compute L2 penalty (sum of squared angular velocities)
+    return torch.sum(torch.square(ang_vel), dim=-1)
 
 
 def if_standing(

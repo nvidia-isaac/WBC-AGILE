@@ -98,6 +98,8 @@ class TestAllTasks(unittest.TestCase):
             "Velocity-T1-v0",
             # T1 Robot - Stand Up
             "StandUp-T1-v0",
+            # G1 Robot - Pick and Place - Tracking
+            "G1-PickPlace-Tracking-v0",
             # ====================================================================
             # 🆕 ADD YOUR NEW TASKS HERE!
             # ====================================================================

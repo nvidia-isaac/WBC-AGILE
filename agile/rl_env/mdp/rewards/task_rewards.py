@@ -26,6 +26,126 @@ from agile.rl_env.mdp.commands import UniformVelocityBaseHeightCommand
 from agile.rl_env.mdp.utils import get_contact_sensor_cfg, get_robot_cfg
 
 
+def static_at_goal_exp(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    progress_threshold: float = 0.8,
+    joint_vel_std: float = 0.5,
+    root_vel_std: float = 0.2,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> torch.Tensor:
+    """Reward being static (low velocities) when late in the trajectory.
+
+    This reward encourages the robot to settle and stop moving toward the end of the
+    trajectory. Uses trajectory progress as the gate instead of position threshold,
+    ensuring the reward always activates at the end of each episode.
+
+    The reward ramps up linearly from 0 at progress_threshold to full strength at progress=1.0.
+    This provides consistent learning signal regardless of tracking accuracy.
+
+    Timeline:
+        Progress:  0.0 -------- 0.8 -------- 1.0
+        Gate:       0           0    ramp    1.0
+                              (start)      (full)
+
+    Args:
+        env: The environment.
+        command_name: Name of the tracking command term.
+        progress_threshold: Trajectory progress above which to start rewarding staticness.
+            Default 0.8 = last 20% of trajectory.
+        joint_vel_std: Standard deviation for exponential kernel on joint velocity norm.
+        root_vel_std: Standard deviation for exponential kernel on root velocity norm.
+        asset_cfg: Asset configuration (can specify joint_names to check specific joints).
+
+    Returns:
+        Reward tensor: product of exp kernels for joint vel and root vel, gated by progress.
+    """
+    command = env.command_manager.get_term(command_name)
+    robot = env.scene[asset_cfg.name]
+
+    # Compute trajectory progress [0, 1]
+    progress = command.timestep_counter.float() / max(command.num_timesteps - 1, 1)
+    progress = torch.clamp(progress, 0.0, 1.0)
+
+    # Compute progress-based gate: ramps from 0 at threshold to 1 at progress=1.0
+    # This ensures the reward gradually increases toward the end
+    gate = (progress - progress_threshold) / (1.0 - progress_threshold)
+    gate = torch.clamp(gate, 0.0, 1.0)
+
+    # Get joint velocities
+    if asset_cfg.joint_ids is not None and len(asset_cfg.joint_ids) > 0:
+        joint_vel = robot.data.joint_vel[:, asset_cfg.joint_ids]
+    else:
+        joint_vel = robot.data.joint_vel
+
+    joint_vel_norm_sq = torch.mean(torch.square(joint_vel), dim=-1)
+
+    # Get root velocity (linear xy + angular z)
+    root_lin_vel_xy = robot.data.root_lin_vel_b[:, :2]  # [num_envs, 2]
+    root_ang_vel_z = robot.data.root_ang_vel_b[:, 2:3]  # [num_envs, 1]
+    root_vel = torch.cat([root_lin_vel_xy, root_ang_vel_z], dim=-1)  # [num_envs, 3]
+    root_vel_norm_sq = torch.mean(torch.square(root_vel), dim=-1)
+
+    # Exponential reward: smaller velocity -> higher reward
+    joint_static_reward = torch.exp(-joint_vel_norm_sq / (joint_vel_std**2))
+    root_static_reward = torch.exp(-root_vel_norm_sq / (root_vel_std**2))
+
+    # Product of both rewards (both need to be static for high reward)
+    static_reward = joint_static_reward * root_static_reward
+
+    # Apply progress-based gate
+    return static_reward * gate
+
+
+def nominal_posture_at_end_exp(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    std: float,
+    progress_threshold: float = 0.8,
+) -> torch.Tensor:
+    """Reward the robot for reaching the final frame's joint posture at the end of trajectory.
+
+    This reward encourages the robot to match the joint positions from the last frame
+    of the reference trajectory. The reward is gated by trajectory progress and uses
+    an exponential kernel on the deviation from the target final pose.
+
+    Args:
+        env: The environment.
+        command_name: Name of the tracking command term.
+        std: Standard deviation for exponential kernel on joint position deviation.
+        progress_threshold: Trajectory progress above which to start rewarding target posture.
+            Default 0.8 = last 20% of trajectory.
+
+    Returns:
+        Reward tensor: exp kernel on joint deviation from final frame target, gated by progress.
+    """
+    command = env.command_manager.get_term(command_name)
+    robot = env.scene[command.cfg.asset_name]
+
+    # Compute trajectory progress [0, 1]
+    progress = command.timestep_counter.float() / max(command.num_timesteps - 1, 1)
+    progress = torch.clamp(progress, 0.0, 1.0)
+
+    # Compute progress-based gate: ramps from 0 at threshold to 1 at progress=1.0
+    gate = (progress - progress_threshold) / (1.0 - progress_threshold)
+    gate = torch.clamp(gate, 0.0, 1.0)
+
+    # Get target joint positions from the last frame of the reference trajectory
+    # Shape: (num_tracked_joints,)
+    target_pos = command.target_tracked_joint_pos[-1]
+
+    # Get robot's current joint positions for the tracked joints
+    # Shape: (num_envs, num_tracked_joints)
+    current_pos = robot.data.joint_pos[:, command.tracked_joint_ids]
+
+    # Compute deviation from target posture
+    deviation_sq = torch.sum(torch.square(current_pos - target_pos), dim=-1)
+    posture_reward = torch.exp(-deviation_sq / (std**2))
+
+    # Apply progress-based gate
+    return posture_reward * gate
+
+
 # Note: The command gets updated after the reward is computed resulting in a one-step reward delay.
 def track_base_height_exp_smooth(env: ManagerBasedRLEnv, command_name: str, std: float) -> torch.Tensor:
     """Reward the agent for tracking the base height."""

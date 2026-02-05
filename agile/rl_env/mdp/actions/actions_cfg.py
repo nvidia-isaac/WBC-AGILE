@@ -25,8 +25,11 @@ from isaaclab.utils import configclass  # noqa: F401
 from agile.rl_env.mdp.actions.harness_action import HarnessAction
 from agile.rl_env.mdp.actions.lift_action import LiftAction
 
+from .delta_actions import DeltaJointPositionAction  # noqa: F401, E402
+
 # Import GUI action class for registration
 from .joint_pos_gui_action import JointPositionGUIAction  # noqa: F401, E402
+from .policy_actions import AgileBasedLowerBodyAction  # noqa: F401, E402
 from .random_actions import RandomPositionAction  # noqa: F401, E402
 
 # Import velocity profile configurations
@@ -167,3 +170,56 @@ class LiftActionCfg(ActionTermCfg):
     """After how many seconds the lift should start"""
     lifting_duration_s: float = 10.0
     """How many seconds the lift should take to move from start to end"""
+
+
+@configclass
+class AgileLowerBodyActionCfg(ActionTermCfg):
+    """Configuration for the lower body action term that is based on Agile lower body RL policy."""
+
+    class_type: type[ActionTerm] = AgileBasedLowerBodyAction
+    """The class type for the lower body action term."""
+
+    joint_names: list[str] = [""]
+    """The names of the joints to control."""
+
+    obs_group_name: str = "agile_policy"
+    """The name of the observation group to use."""
+
+    policy_path: str = ""
+    """The path to the policy model."""
+
+    policy_output_offset: float = 0.0
+    """Offsets the output of the policy."""
+
+    policy_output_scale: float = 1.0
+    """Scales the output of the policy."""
+
+
+@configclass
+class DeltaJointPositionActionCfg(ActionTermCfg):
+    """Configuration for the joint position action term.
+
+    See :class:`DeltaJointPositionAction` for more details.
+    """
+
+    class_type: type[ActionTerm] = DeltaJointPositionAction
+
+    joint_names: list[str] = [""]
+    """List of joint names or regex expressions that the action will be mapped to."""
+
+    steady_joint_names: list[str] = [""]
+    """List of joint names or regex expressions that the joint positions will be kept steady to default positions."""
+
+    scale: float | dict[str, float] = 0.1
+    """Scale factor for the action (float or dict of regex expressions). Defaults to 1.0."""
+
+    offset: float | dict[str, float] = 0.0
+    """Offset factor for the action (float or dict of regex expressions). Defaults to 0.0."""
+
+    preserve_order: bool = False
+    """Whether to preserve the order of the joint names in the action output. Defaults to False."""
+
+    joint_limits: dict[str, tuple[float, float]] | None = None
+    """Dictionary mapping joint names to position limits (lower, upper).
+    If provided, these limits will be applied to the processed actions.
+    If not provided, falls back to clip if defined. Defaults to None."""

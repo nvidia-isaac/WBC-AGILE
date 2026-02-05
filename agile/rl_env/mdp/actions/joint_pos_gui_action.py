@@ -102,9 +102,7 @@ class JointPositionGUIAction(JointPositionAction):
         self._actuator_joint_ids: dict[str, torch.Tensor] = {}
         for name, actuator in self._asset.actuators.items():
             actuator_joint_ids = self._asset.find_joints(actuator.joint_names)[0]
-            self._actuator_joint_ids[name] = torch.tensor(
-                actuator_joint_ids, device=self.device, dtype=torch.long
-            )
+            self._actuator_joint_ids[name] = torch.tensor(actuator_joint_ids, device=self.device, dtype=torch.long)
 
         if self._robot_type == "g1":
             self._symmetry_augmentation_func = lr_mirror_G1

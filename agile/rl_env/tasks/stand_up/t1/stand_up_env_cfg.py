@@ -336,7 +336,7 @@ class RewardsCfg:
     )
 
     root_acc = RewTerm(
-        func=mdp.root_acc_l2,  # type: ignore
+        func=mdp.body_acc_l2,  # type: ignore
         weight=-5e-5,
         params={"asset_cfg": SceneEntityCfg("robot")},
     )

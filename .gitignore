@@ -2,6 +2,7 @@
 *.egg-info
 
 *.cursor
+*.cursorrules
 logs/**
 .vscode/**
 .git_info/**

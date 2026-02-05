@@ -15,3 +15,4 @@
 
 from .observations_cfg import *  # noqa: F401, F403
 from .observations_io import *  # noqa: F401, F403
+from .tracking_observations import *  # noqa: F401, F403

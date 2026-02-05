@@ -16,10 +16,12 @@
 
 import torch
 
-from isaaclab.assets import RigidObject
+import isaaclab.utils.math as math_utils
+from isaaclab.assets import Articulation, RigidObject
 from isaaclab.envs import ManagerBasedRLEnv
 from isaaclab.managers import EventTermCfg, ManagerTermBase, SceneEntityCfg
 from isaaclab.sensors import ContactSensor, RayCaster
+from isaaclab.utils.math import subtract_frame_transforms
 
 from agile.rl_env.mdp.utils import get_robot_cfg
 
@@ -130,3 +132,93 @@ class standing(ManagerTermBase):
         if env_ids is None:
             env_ids = torch.arange(self._env.num_envs)
         self.standing_timer[env_ids] = 0
+
+
+def bad_base_pose(
+    env: ManagerBasedRLEnv,
+    base_pos_threshold: float,
+    command_name: str,
+) -> torch.Tensor:
+    """Terminate when the robot is away from the trajectory."""
+    command = env.command_manager.get_term(command_name)
+    base_pos_error = torch.norm(command.command_anchor_pos_w - command.robot_anchor_pos_w, dim=-1)
+    return base_pos_error > base_pos_threshold
+
+
+def bad_base_rotation(
+    env: ManagerBasedRLEnv,
+    base_ori_threshold: float,
+    command_name: str,
+) -> torch.Tensor:
+    """Terminate when the robot is away from the trajectory."""
+    command = env.command_manager.get_term(command_name)
+    base_ori_error = math_utils.quat_error_magnitude(command.command_anchor_quat_w, command.robot_anchor_quat_w)
+    return base_ori_error > base_ori_threshold
+
+
+def bad_joint_pos(
+    env: ManagerBasedRLEnv,
+    joint_pos_threshold: float,
+    command_name: str,
+) -> torch.Tensor:
+    """Terminate when the robot is away from the trajectory."""
+    command = env.command_manager.get_term(command_name)
+    joint_pos_error = torch.norm(command.command_tracked_joint_pos - command.robot_tracked_joint_pos, dim=-1)
+    return joint_pos_error > joint_pos_threshold
+
+
+def out_of_bound(
+    env: ManagerBasedRLEnv,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("object"),
+    in_bound_range: dict[str, tuple[float, float]] = {},  # noqa: B006
+    reference_asset_cfg: SceneEntityCfg | None = None,
+) -> torch.Tensor:
+    """Termination condition for the object falls out of bound.
+
+    Args:
+        env: The environment.
+        asset_cfg: The object configuration. Defaults to SceneEntityCfg("object").
+        in_bound_range: The range in x, y, z such that the object is considered in range.
+        reference_asset_cfg: Optional reference asset configuration with body_names specified.
+            If provided, the body_names must resolve to exactly one body to use as reference frame.
+
+    Raises:
+        ValueError: If reference_asset_cfg is provided but body_names is not specified or resolves to multiple bodies.
+    """
+    object: RigidObject = env.scene[asset_cfg.name]
+    # Default to (-inf, inf) for unspecified dimensions - always in bounds
+    range_list = [in_bound_range.get(key, (float("-inf"), float("inf"))) for key in ["x", "y", "z"]]
+    ranges = torch.tensor(range_list, device=env.device)
+
+    # Get object position in world frame
+    object_pos_w = object.data.root_pos_w
+
+    # Transform object position to reference frame
+    if reference_asset_cfg is not None:
+        # Use asset link as reference frame
+        reference_asset: Articulation = env.scene[reference_asset_cfg.name]
+        # Get the body IDs from the reference_asset_cfg
+        body_ids = reference_asset_cfg.body_ids
+        if body_ids is None or len(body_ids) == 0:
+            raise ValueError(
+                f"reference_asset_cfg must have body_names specified. "
+                f"Please provide body_names in SceneEntityCfg for asset '{reference_asset_cfg.name}'."
+            )
+        if len(body_ids) != 1:
+            raise ValueError(
+                f"reference_asset_cfg must resolve to exactly one body, but got {len(body_ids)} bodies: {body_ids}. "
+                f"Please specify a single body name in reference_asset_cfg."
+            )
+        body_id = body_ids[0]
+        # Get the reference link pose in world frame
+        reference_pos_w = reference_asset.data.body_pos_w[:, body_id, :]
+        reference_quat_w = reference_asset.data.body_quat_w[:, body_id, :]
+        # Transform object position from world frame to reference link frame
+        object_pos_local, _ = subtract_frame_transforms(reference_pos_w, reference_quat_w, object_pos_w)
+    else:
+        # Use environment origins as reference frame (no rotation)
+        object_pos_local = object_pos_w - env.scene.env_origins
+
+    # Check if object is outside bounds
+    outside_bounds = ((object_pos_local < ranges[:, 0]) | (object_pos_local > ranges[:, 1])).any(dim=1)
+    return outside_bounds

@@ -137,7 +137,41 @@ Tasks for learning to recover from arbitrary fallen poses and stand up. Uses ful
 
 ---
 
-### 4. Debug (`debug/`)
+### 4. Pick and Place (`pick_place/`)
+
+Motion tracking tasks for learning pick-and-place manipulation behaviors. The robot learns to track reference trajectories for the upper body while maintaining stable lower body control via a pre-trained locomotion policy.
+
+#### Unitree G1 Robot
+
+| Task ID | Controlled Joints | Policy Type | Commands | Observations | Actuator Model |
+|---------|-------------------|-------------|----------|--------------|----------------|
+| `G1-PickPlace-Tracking-v0` | Right arm + hand + waist (16 joints) | Teacher (Non-Privileged) | Trajectory tracking | Current state | Implicit Actuator |
+| `G1-PickPlace-Tracking-v0-Play` | Right arm + hand + waist (16 joints) | Evaluation | Trajectory tracking | Current state | Implicit Actuator |
+
+**Key Features:**
+- **Modular Policy Architecture**: Upper body (manipulation) and lower body (locomotion) are controlled by separate policies
+- **Reference Trajectory Tracking**: Upper body tracks pre-recorded motion trajectories from YAML files
+- **Pre-trained Locomotion**: Lower body uses a frozen pre-trained locomotion policy for stability
+- **Object Interaction**: Scene includes a table and manipulable object for pick-and-place tasks
+
+**Debug Environment Features:**
+- Interactive joint position GUI for the right arm/hand
+- Object pose GUI for manipulating object position and rotation
+- Reward visualizer for monitoring reward terms in real-time
+- Contact sensor visualization on fingertips
+
+To run:
+```bash
+# Training
+python scripts/train.py --task G1-PickPlace-Tracking-v0
+
+# Play trained policy
+python scripts/play.py --task G1-PickPlace-Tracking-v0-Play
+```
+
+---
+
+### 5. Debug (`debug/`)
 
 Special environments for debugging MDP terms (rewards, observations), symmetry functions, and robot models. These environments provide interactive GUI controls for direct joint and object manipulation.
 

@@ -219,3 +219,66 @@ def reset_root_state_uniform_some_standing(
     # set into the physics simulation
     asset.write_root_pose_to_sim(torch.cat([positions, orientations], dim=-1), env_ids=env_ids)
     asset.write_root_velocity_to_sim(velocities, env_ids=env_ids)
+
+
+def reset_robot_to_trajectory(
+    env: ManagerBasedRLEnv,
+    env_ids: torch.Tensor,
+    trajectory_time_idx: tuple[int, int],
+    command_name: str,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> None:
+    """Reset the robot to a random timestep along a reference trajectory.
+
+    Args:
+        env: The environment instance.
+        env_ids: The environment indices to reset.
+        trajectory_time_idx: Range ``(start_idx, end_idx)`` of valid timesteps to sample from.
+        command_name: The name of the trajectory command term.
+        joint_pos_noise: Uniform noise magnitude for tracked joint positions. Defaults to 0.0.
+        asset_cfg: The robot asset configuration. Defaults to ``SceneEntityCfg("robot")``.
+    """
+    command = env.command_manager.get_term(command_name)
+    robot: Articulation = env.scene[asset_cfg.name]
+    command.timestep_counter[env_ids] = torch.randint(
+        max(0, trajectory_time_idx[0]),
+        min(command.num_timesteps - 1, trajectory_time_idx[1]),
+        (len(env_ids),),
+        dtype=torch.int32,
+        device=env.device,
+    )
+
+    # Resample the command
+    command.pos_command_e[env_ids] = command.pos_trajectory_w[command.timestep_counter[env_ids]].float()
+    command.quat_command_e[env_ids] = (
+        math_utils.quat_unique(command.quat_trajectory_w[command.timestep_counter[env_ids]].float())
+        if command.cfg.make_quat_unique
+        else command.quat_trajectory_w[command.timestep_counter[env_ids]].float()
+    )
+    command.tracked_joint_pos_command[env_ids] = command.target_tracked_joint_pos[
+        command.timestep_counter[env_ids]
+    ].float()
+
+    # Reset the robot based on the command
+    positions = command.pos_command_e[env_ids] + command._env.scene.env_origins[env_ids]
+    orientations = command.quat_command_e[env_ids]
+
+    robot.write_root_pose_to_sim(torch.cat([positions, orientations], dim=-1), env_ids=env_ids)
+    robot.write_root_velocity_to_sim(torch.zeros_like(robot.data.root_vel_w[env_ids]), env_ids=env_ids)
+
+    # Reset the tracked joints to command positions
+    robot.write_joint_state_to_sim(
+        command.tracked_joint_pos_command[env_ids],
+        torch.zeros_like(robot.data.joint_vel[..., command.tracked_joint_ids][env_ids]),
+        joint_ids=command.tracked_joint_ids,
+        env_ids=env_ids,
+    )
+
+    # Reset all other (non-tracked) joints to default positions
+    if command.default_other_joint_pos is not None:
+        robot.write_joint_state_to_sim(
+            command.default_other_joint_pos[env_ids],
+            torch.zeros(len(env_ids), len(command.other_joint_ids), device=command.device),
+            joint_ids=command.other_joint_ids,
+            env_ids=env_ids,
+        )

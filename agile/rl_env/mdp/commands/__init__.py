@@ -24,6 +24,8 @@ from .commands_cfg import (
     UniformVelocityBaseHeightCommandCfg,
     UniformVelocityGaitBaseHeightCommandCfg,
 )
+from .tracking_commands import TrackingCommand
+from .tracking_commands_cfg import TrackingCommandCfg
 
 __all__ = [
     "UniformNullVelocityCommand",
@@ -32,4 +34,6 @@ __all__ = [
     "UniformVelocityBaseHeightCommandCfg",
     "UniformVelocityGaitBaseHeightCommand",
     "UniformVelocityGaitBaseHeightCommandCfg",
+    "TrackingCommand",
+    "TrackingCommandCfg",
 ]

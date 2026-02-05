@@ -498,7 +498,7 @@ For complete license information and full terms, see the [LICENCE](LICENCE) file
 </details>
 
 ## Core Contributors
-Huihua Zhao, Rafael Cathomen, Lionel Gulich, Efe Arda Ongan, Michael Lin, Shalin Jain, Wei Liu, Vishal Kulkarni, Soha Pouya, Yan Chang
+Huihua Zhao, Rafael Cathomen, Lionel Gulich, Efe Arda Ongan, Michael Lin, Shalin Jain, Wei Liu, Xinghao Zhu, Vishal Kulkarni, Soha Pouya, Yan Chang
 
 ## Acknowledgments
 We would like to acknowledge the following projects from which parts of the code in this repo are derived:
