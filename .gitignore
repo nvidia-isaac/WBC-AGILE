@@ -13,3 +13,7 @@ agile/data/policy/eval/**
 **/exported/**
 
 *IO_descriptors.yaml
+
+fallen_states_cache/
+
+CLAUDE.md

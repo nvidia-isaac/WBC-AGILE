@@ -66,14 +66,6 @@ parser.add_argument(
     default=10000,
     help="Number of steps to run the agent.",
 )
-# Add curriculum ratio for upper body action
-parser.add_argument(
-    "--curriculum_ratio",
-    "-c",
-    type=float,
-    default=0.5,
-    help="Curriculum ratio for upper body action.",
-)
 # Add argument for direct metrics file output
 parser.add_argument(
     "--metrics_file",
@@ -109,6 +101,12 @@ parser.add_argument(
     default=False,
     help="Automatically generate HTML report after evaluation (requires --save_trajectories).",
 )
+parser.add_argument(
+    "--export_io",
+    action="store_true",
+    default=False,
+    help="Export IO descriptor YAML file to the exported policy directory.",
+)
 
 # append RSL-RL cli arguments
 cli_args.add_rsl_rl_args(parser)
@@ -134,7 +132,6 @@ import torch
 from isaaclab.envs import DirectMARLEnv, multi_agent_to_single_agent
 from isaaclab.utils.assets import retrieve_file_path
 from isaaclab.utils.dict import print_dict
-from isaaclab.utils.pretrained_checkpoint import get_published_pretrained_checkpoint
 from isaaclab_tasks.utils import get_checkpoint_path, parse_env_cfg
 
 import agile.rl_env.tasks  # noqa: F401
@@ -315,6 +312,12 @@ def main():
     log_root_path = os.path.abspath(log_root_path)
     print(f"[INFO] Loading experiment from directory: {log_root_path}")
     if args_cli.use_pretrained_checkpoint:
+        try:
+            from isaaclab.utils.pretrained_checkpoint import get_published_pretrained_checkpoint
+        except ImportError:
+            print("[ERROR] Pretrained checkpoint feature not available in this Isaac Lab version.")
+            return
+
         resume_path = get_published_pretrained_checkpoint("rsl_rl", args_cli.task)
         if not resume_path:
             print("[INFO] Unfortunately a pre-trained checkpoint is currently unavailable for this task.")
@@ -328,6 +331,9 @@ def main():
 
     # create isaac environment
     env = gym.make(args_cli.task, cfg=env_cfg, render_mode="rgb_array" if args_cli.video else None)
+
+    # Call pre_learn hook if the task provides one (e.g., to load fallen state dataset)
+    _call_pre_learn_hook(env.unwrapped, args_cli.task, agent_cfg)
 
     # convert to single-agent instance if required by the RL algorithm
     if isinstance(env.unwrapped, DirectMARLEnv):
@@ -353,6 +359,7 @@ def main():
 
     # Export policy to onnx/jit if we loaded from a regular checkpoint
     # (Skip if already TorchScript or if export fails)
+    export_model_dir = None
     if ppo_runner is not None:
         try:
             export_model_dir = os.path.join(os.path.dirname(resume_path), "exported")
@@ -374,6 +381,45 @@ def main():
             # This is not critical for evaluation, so we continue
     else:
         print("[INFO] Skipping export (policy already in TorchScript format)")
+        # If loaded from TorchScript, the exported directory should already exist
+        export_model_dir = os.path.join(os.path.dirname(resume_path), "exported")
+
+    # Export IO descriptor if requested
+    if args_cli.export_io:
+        if export_model_dir:
+            print(f"[INFO] Exporting IO descriptor to {export_model_dir}...")
+            try:
+                import subprocess
+                import sys
+
+                # Get the path to the export_IODescriptors.py script
+                script_dir = os.path.dirname(os.path.abspath(__file__))
+                export_script = os.path.join(script_dir, "export_IODescriptors.py")
+
+                # Build the command to run the export script
+                cmd = [
+                    sys.executable,
+                    export_script,
+                    "--task",
+                    args_cli.task,
+                    "--output_dir",
+                    export_model_dir,
+                    "--headless",
+                ]
+
+                # Run the export script
+                result = subprocess.run(cmd, check=True, capture_output=True, text=True)
+                print("[INFO] Successfully exported IO descriptor")
+                if result.stdout:
+                    print(result.stdout)
+            except subprocess.CalledProcessError as e:
+                print(f"[WARNING] Failed to export IO descriptor: {e}")
+                if e.stderr:
+                    print(f"[ERROR] {e.stderr}")
+            except Exception as e:
+                print(f"[WARNING] Failed to export IO descriptor: {e}")
+        else:
+            print("[WARNING] Cannot export IO descriptor: export directory not available")
 
     # Get the control timestep (not physics timestep - accounts for decimation)
     dt = env.unwrapped.step_dt
@@ -462,12 +508,11 @@ def main():
     while simulation_app.is_running() and num_steps < args_cli.num_steps:
         start_time = time.time()
 
-        # Check if we need to update scheduled commands based on time
-        if scheduler:
-            scheduler.update(dt)
-
         # run everything in inference mode
         with torch.inference_mode():
+            # Check if we need to update scheduled commands based on time
+            if scheduler:
+                scheduler.update(dt)
             # Convert TensorDict to tensor if needed (for exported TorchScript policies)
             if is_tensordict_obs and ppo_runner is None:
                 # Flatten TensorDict to tensor for exported policy
@@ -584,6 +629,25 @@ def main():
 
     # close the simulator
     env.close()
+
+
+def _call_pre_learn_hook(env, task_name: str, agent_cfg) -> None:
+    """Call pre_learn hook if the task provides one.
+
+    This is needed for tasks that require setup before the first reset
+    (e.g., loading fallen state datasets for stand-up tasks).
+    """
+    import importlib
+
+    pre_learn_entry_point = gym.spec(task_name).kwargs.get("pre_learn_entry_point")
+    if pre_learn_entry_point is None:
+        return  # No pre_learn hook for this task
+
+    # Call pre_learn
+    mod_name, fn_name = pre_learn_entry_point.split(":")
+    mod = importlib.import_module(mod_name)
+    pre_learn_fn = getattr(mod, fn_name)
+    pre_learn_fn(env, task_name, agent_cfg)
 
 
 if __name__ == "__main__":

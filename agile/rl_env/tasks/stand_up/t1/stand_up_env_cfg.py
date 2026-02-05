@@ -14,7 +14,6 @@
 # limitations under the License.
 
 
-import math
 import pathlib
 
 import isaaclab.sim as sim_utils
@@ -40,8 +39,6 @@ from agile.rl_env.mdp.terrains import STAND_UP_ROUGH_TERRAIN_CFG  # noqa: F401, 
 
 FILE_DIR = pathlib.Path(__file__).parent
 REPO_DIR = FILE_DIR.parent.parent.parent
-
-REST_DURATION_S = 2.0
 
 from_scratch = 1.0
 with_curriculum = 1.0
@@ -124,7 +121,6 @@ class ObservationsCfg:
         # observation terms (order preserved)
         base_ang_vel = ObsTerm(func=mdp.base_ang_vel, scale=0.2, noise=Unoise(n_min=-0.2, n_max=0.2))
         projected_gravity = ObsTerm(func=mdp.projected_gravity, noise=Unoise(n_min=-0.05, n_max=0.05))
-        # The controlled joints are defined in the configs post init
         joint_pos = ObsTerm(
             func=mdp.joint_pos_rel,
             noise=Unoise(n_min=-0.01, n_max=0.01),
@@ -152,10 +148,6 @@ class ObservationsCfg:
         joint_pos = ObsTerm(func=mdp.joint_pos_rel)
         joint_vel = ObsTerm(func=mdp.joint_vel_rel, scale=0.05)
         actions = ObsTerm(func=mdp.last_action, clip=(-100, 100))
-        is_env_inactive = ObsTerm(
-            func=mdp.is_env_inactive,
-            params={"rest_duration_s": REST_DURATION_S},
-        )
         contact_forces = ObsTerm(
             func=mdp.contact_force_norm,
             params={
@@ -199,6 +191,8 @@ class ActionsCfg:
         stiffness_forces=5000.0,
         damping_forces=500.0,
         force_limit=300.0,
+        damping_torques=100.0,  # Damp yaw rotation to prevent spinning
+        torque_limit=250.0,
         height_sensor="height_measurement_sensor",
         target_height=booster_t1.DEFAULT_TRUNK_HEIGHT,
         start_lifting_time_s=3.0,
@@ -212,29 +206,11 @@ class RewardsCfg:
 
     # Regularization:
     joint_torques_l2 = RewTerm(func=mdp.joint_torques_l2, weight=-1.0e-5)
-    torque_limits = RewTerm(func=mdp.applied_torque_limits, weight=-0.001)
+    torque_limits = RewTerm(func=mdp.applied_torque_limits, weight=-0.01)
     joint_acc_l2 = RewTerm(func=mdp.joint_acc_l2, weight=-2.5e-8)
-    joint_pos_limits = RewTerm(func=mdp.joint_pos_limits, weight=-0.01)
+    joint_pos_limits = RewTerm(func=mdp.joint_pos_limits, weight=-0.1)
     joint_vel_limits = RewTerm(func=mdp.joint_vel_limits, weight=-0.01, params={"soft_ratio": 0.8})
-    action_rate = RewTerm(
-        func=mdp.action_rate_l2_if_actor_active,
-        weight=-0.01,
-        params={"rest_duration_s": REST_DURATION_S},
-    )
-    action_rate_rate = RewTerm(
-        func=mdp.action_rate_rate_l2_if_actor_is_active,
-        weight=-0.0001,
-        params={"asset_cfg": SceneEntityCfg("robot"), "rest_duration_s": REST_DURATION_S},
-    )
-    action_l2 = RewTerm(func=mdp.action_l2_if_actor_active, weight=-0.05, params={"rest_duration_s": REST_DURATION_S})
-
-    incoming_forces_penalty = RewTerm(
-        func=mdp.max_incoming_forces_penalty,
-        weight=-5e-7,
-        params={
-            "robot_cfg": SceneEntityCfg("robot", body_names=".*"),
-        },
-    )
+    action_rate = RewTerm(func=mdp.action_rate_l2, weight=-0.01)
 
     # Task:
     base_height_rough = RewTerm(
@@ -266,14 +242,40 @@ class RewardsCfg:
     )
 
     joint_deviation_l1 = RewTerm(
-        func=mdp.joint_deviation_exp_if_standing,
-        weight=0.05,
+        func=mdp.joint_deviation_if_standing,
+        weight=-0.05,
         params={
             "asset_cfg": SceneEntityCfg("robot"),
             "standing_height_threshold": booster_t1.DEFAULT_TRUNK_HEIGHT * 0.8,
             "sensor_cfg": SceneEntityCfg("height_measurement_sensor"),
-            "std": 0.1,
+            "mode": "l1",
         },
+    )
+
+    joint_deviation_l1_upper_body = RewTerm(
+        func=mdp.joint_deviation_if_standing,
+        weight=-0.05,
+        params={
+            "asset_cfg": SceneEntityCfg(
+                "robot",
+                joint_names=booster_t1.ARM_JOINT_NAMES + booster_t1.HEAD_JOINT_NAMES + booster_t1.WAIST_JOINT_NAMES,
+            ),
+            "standing_height_threshold": booster_t1.DEFAULT_TRUNK_HEIGHT * 0.8,
+            "sensor_cfg": SceneEntityCfg("height_measurement_sensor"),
+            "mode": "l1",
+        },
+    )
+
+    ankle_torques = RewTerm(
+        func=mdp.joint_torques_l2,
+        weight=-1e-3,
+        params={"asset_cfg": SceneEntityCfg("robot", joint_names=".*Ankle.*")},
+    )
+
+    ang_vel_xy = RewTerm(
+        func=mdp.ang_vel_xy_l2,
+        weight=-0.5,
+        params={"asset_cfg": SceneEntityCfg("robot")},
     )
 
     orientation = RewTerm(
@@ -284,7 +286,7 @@ class RewardsCfg:
 
     not_moving = RewTerm(
         func=mdp.moving_if_standing,
-        weight=-0.05,
+        weight=-0.5,
         params={
             "asset_cfg": SceneEntityCfg("robot"),
             "weight_lin": 1.0,
@@ -295,17 +297,6 @@ class RewardsCfg:
     )
 
     # Aesthetics
-    equal_foot_force = RewTerm(
-        func=mdp.equal_foot_force_if_standing,
-        weight=2.5,
-        params={
-            "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*foot_link"),
-            "asset_cfg": SceneEntityCfg("robot"),
-            "standing_height_threshold": booster_t1.DEFAULT_TRUNK_HEIGHT * 0.8,
-            "height_measurement_sensor": SceneEntityCfg("height_measurement_sensor"),
-        },
-    )
-
     illegal_contacts = RewTerm(
         func=mdp.illegal_contact,
         weight=-1.0,
@@ -322,6 +313,7 @@ class RewardsCfg:
             "asset_cfg": SceneEntityCfg("robot", body_names=booster_t1.FEET_LINK_NAMES),
             "ref_distance": 0.2,  # 20cm lateral distance between feet
             "standing_height_threshold": booster_t1.DEFAULT_TRUNK_HEIGHT * 0.8,
+            "norm": "l1",
         },
     )
 
@@ -336,16 +328,26 @@ class RewardsCfg:
     )
 
     root_acc = RewTerm(
-        func=mdp.root_acc_l2,  # type: ignore
-        weight=-5e-5,
-        params={"asset_cfg": SceneEntityCfg("robot")},
+        func=mdp.body_acc_l2,  # type: ignore
+        weight=-5e-4,
+        params={"asset_cfg": SceneEntityCfg("robot", body_names="Trunk")},
     )
 
     # Termination
     stand_up_termination = RewTerm(
+        func=mdp.standing_at_timeout,
+        weight=250.0,
+        params={
+            "min_height": booster_t1.DEFAULT_TRUNK_HEIGHT * 0.8,
+            "asset_cfg": SceneEntityCfg("robot"),
+            "sensor_cfg": SceneEntityCfg("height_measurement_sensor"),
+        },
+    )
+
+    no_height_progress_termination = RewTerm(
         func=mdp.is_terminated_term,
-        weight=10.0,
-        params={"term_keys": "standing"},
+        weight=-5.0,
+        params={"term_keys": "no_height_progress"},
     )
 
 
@@ -355,13 +357,13 @@ class TerminationsCfg:
 
     time_out = DoneTerm(func=mdp.time_out, time_out=True)
 
-    standing = DoneTerm(
-        func=mdp.standing,
+    no_height_progress = DoneTerm(
+        func=mdp.no_height_progress,
         params={
-            "asset_cfg": SceneEntityCfg("robot"),
-            "min_height": booster_t1.DEFAULT_TRUNK_HEIGHT * 0.8,
+            "asset_cfg": SceneEntityCfg("robot", body_names="Trunk"),
             "sensor_cfg": SceneEntityCfg("height_measurement_sensor"),
-            "duration_s": 5.0,
+            "height_increase_threshold": 0.2,
+            "time_limit_s": 10.0,
         },
     )
 
@@ -453,14 +455,7 @@ class EventCfg:
         },
     )
 
-    # reset
-
-    disable_robot_joint_actions = EventTerm(
-        func=mdp.disable_joints,
-        mode="pre_sim_step",
-        params={"rest_duration_s": REST_DURATION_S},
-    )
-
+    # interval
     apply_external_force_torque = EventTerm(
         func=mdp.apply_external_force_torque,
         mode="interval",
@@ -483,53 +478,27 @@ class EventCfg:
         },
     )
 
-    reset_base = EventTerm(
-        func=mdp.reset_root_state_uniform_some_standing,
-        mode="reset",
-        params={
-            "standing_ratio": 0.1,
-            "pose_range": {
-                "x": (-0.0, 0.0),
-                "y": (-0.0, 0.0),
-                "z": (-0.0, 0.0),
-                "yaw": (-3.14, 3.14),
-                "roll": (-math.radians(20), math.radians(20)),
-                "pitch": (-math.radians(20), math.radians(20)),
-            },
-            "velocity_range": {
-                "x": (-5.0, 5.0),
-                "y": (-5.0, 5.0),
-                "z": (-0.0, 0.0),
-                "roll": (-5.0, 5.0),
-                "pitch": (-5.0, 5.0),
-                "yaw": (-5.0, 5.0),
-            },
-            "asset_cfg": SceneEntityCfg("robot", body_names=[".*foot_link.*"]),
-        },
-    )
-
-    reset_robot_joints = EventTerm(
-        func=mdp.reset_joints_by_scale,
-        mode="reset",
-        params={
-            "position_range": (0.0, 2.0),
-            "velocity_range": (-1.0, 1.0),
-        },
-    )
-
-    # interval
     push_robot = EventTerm(
         func=mdp.push_by_setting_velocity,
         mode="interval",
-        interval_range_s=(2.0, 4.0),
+        interval_range_s=(0.0, 10.0),
         params={
             "velocity_range": {
-                "x": (-0.5, 0.5),
-                "roll": (-0.25, 0.25),
-                "y": (-0.5, 0.5),
-                "pitch": (-0.25, 0.25),
-                "yaw": (-0.25, 0.25),
+                "x": (-1.0, 1.0),
+                "y": (-1.0, 1.0),
+                "roll": (-0.5, 0.5),
+                "pitch": (-0.5, 0.5),
+                "yaw": (-0.5, 0.5),
             }
+        },
+    )
+
+    # reset
+    reset_base = EventTerm(
+        func=mdp.reset_from_fallen_dataset,
+        mode="reset",
+        params={
+            "standing_ratio": 0.1,
         },
     )
 
@@ -539,46 +508,26 @@ class CurriculumCfg:
     """Curriculum terms for the MDP."""
 
     terrain_levels = CurrTerm(
-        func=mdp.terrain_levels_successful_termination,
+        func=mdp.terrain_levels_standing_at_timeout,
         params={
-            "successful_termination_term": "standing",
+            "min_height": booster_t1.DEFAULT_TRUNK_HEIGHT * 0.8,
+            "asset_cfg": SceneEntityCfg("robot"),
+            "sensor_cfg": SceneEntityCfg("height_measurement_sensor"),
             "n_successes": 5,
             "n_failures": 5,
         },
     )
 
-    remove_lift = CurrTerm(
-        func=mdp.remove_harness,
+    adaptive_lift = CurrTerm(
+        func=mdp.adaptive_lift_curriculum,
         params={
-            "harness_action_name": "lift",
-            "start": 5_000 * from_scratch,
-            "num_steps": 200_000 * from_scratch,
-            "linear": False,
-        },
-    )
-
-    action_limit_successful_termination = CurrTerm(
-        func=mdp.action_limit_successful_termination,
-        params={
-            "successful_termination_term": "standing",
-            "activate_after_steps": 100_000 * from_scratch,
-            "action_name": "joint_pos",
-            "update_rate": 0.001,
-            "move_up_ratio": 0.95,
-            "move_down_ratio": 0.8,
-            "max_action_limit": 1.0,
-        },
-    )
-
-    # rewards
-    increase_action_regularization = CurrTerm(
-        func=mdp.update_reward_weight_step,
-        params={
-            "reward_name": "action_l2",
-            "start_step": 70_000 * from_scratch,
-            "num_steps": 150_000 * with_curriculum,
-            "terminal_weight": -0.25,
-            "use_log_space": True,
+            "lift_action_name": "lift",
+            "standing_height_threshold": booster_t1.DEFAULT_TRUNK_HEIGHT - 0.1,
+            "standing_ratio_to_decrease": 0.7,
+            "ema_alpha": 0.01,
+            "epsilon": 0.0001,
+            "force_scale_disable_threshold": 0.01,
+            "only_decrease": True,
         },
     )
 
@@ -586,21 +535,21 @@ class CurriculumCfg:
         func=mdp.update_reward_weight_step,
         params={
             "reward_name": "action_rate",
-            "start_step": 100_000 * from_scratch,
-            "num_steps": 150_000 * with_curriculum,
+            "start_step": 25_000 * from_scratch,
+            "num_steps": 50_000 * with_curriculum,
             "terminal_weight": -0.1,
             "use_log_space": True,
         },
     )
 
-    increase_action_rate_rate_regularization = CurrTerm(
+    increase_no_progress_penalty = CurrTerm(
         func=mdp.update_reward_weight_step,
         params={
-            "reward_name": "action_rate_rate",
-            "start_step": 150_000 * from_scratch,
-            "num_steps": 150_000,
-            "terminal_weight": -0.1,
-            "use_log_space": False,
+            "reward_name": "no_height_progress_termination",
+            "start_step": 60_000 * from_scratch,
+            "num_steps": 60_000 * with_curriculum,
+            "terminal_weight": -100,
+            "use_log_space": True,
         },
     )
 
@@ -608,21 +557,21 @@ class CurriculumCfg:
         func=mdp.update_reward_weight_step,
         params={
             "reward_name": "joint_deviation_l1",
-            "start_step": 100_000 * from_scratch,
-            "num_steps": 150_000 * with_curriculum,
-            "terminal_weight": 10.0,
+            "start_step": 50_000 * from_scratch,
+            "num_steps": 50_000 * with_curriculum,
+            "terminal_weight": -0.5,
             "use_log_space": False,
         },
     )
 
-    increase_incoming_forces_penalty = CurrTerm(
+    increase_joint_deviation_upper_body_regularization = CurrTerm(
         func=mdp.update_reward_weight_step,
         params={
-            "reward_name": "incoming_forces_penalty",
-            "start_step": 120_000 * from_scratch,
-            "num_steps": 150_000 * with_curriculum,
-            "terminal_weight": -1e-5,
-            "use_log_space": True,
+            "reward_name": "joint_deviation_l1_upper_body",
+            "start_step": 50_000 * from_scratch,
+            "num_steps": 50_000 * with_curriculum,
+            "terminal_weight": -0.5,
+            "use_log_space": False,
         },
     )
 
@@ -672,12 +621,14 @@ class T1StandUpEnvCfg(ManagerBasedRLEnvCfg):
 
     def __post_init__(self):
         super().__post_init__()
-        self.decimation = 10
-        self.episode_length_s = 20.0
-        self.sim.dt = 1 / 500
+        self.decimation = 4
+        self.episode_length_s = 15.0
+        self.sim.dt = 1 / 200
         self.sim.render_interval = self.decimation
         self.sim.physics_material = self.scene.terrain.physics_material
         self.scene.contact_forces.update_period = self.sim.dt
+
+        self.sim.physx.gpu_max_rigid_patch_count = 10 * 2**15
 
         if self.scene.height_measurement_sensor is not None:
             self.scene.height_measurement_sensor.update_period = self.sim.dt

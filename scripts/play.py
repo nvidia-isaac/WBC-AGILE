@@ -38,6 +38,12 @@ parser.add_argument("--video", action="store_true", default=False, help="Record 
 parser.add_argument("--video_length", type=int, default=400, help="Length of the recorded video (in steps).")
 parser.add_argument("--disable_fabric", action="store_true", default=False, help="Disable Fabric (use USD I/O).")
 parser.add_argument("--real-time", action="store_true", default=False, help="Run close to real-time if possible.")
+parser.add_argument(
+    "--validate-fallen-states",
+    action="store_true",
+    default=False,
+    help="Validate fallen state dataset by visualizing collected poses with zero actions.",
+)
 
 # Isaac Sim app args
 AppLauncher.add_app_launcher_args(parser)
@@ -139,6 +145,13 @@ def main() -> None:
     render_mode = "rgb_array" if args_cli.video else None
     env = ManagerBasedRLEnv(env_cfg, render_mode=render_mode)
 
+    # Call pre_learn hook if the task provides one (e.g., to load fallen state dataset)
+    _call_pre_learn_hook(env, args_cli.task)
+
+    # Setup for fallen state validation mode (set standing_ratio=0)
+    if args_cli.validate_fallen_states:
+        _setup_fallen_state_validation(env)
+
     # Optional video recording (uses gym wrapper over our Env)
     if args_cli.video:
         video_dir = os.path.abspath(os.path.join("logs", "videos", "play"))
@@ -152,9 +165,6 @@ def main() -> None:
         print_dict(video_kwargs, nesting=4)
         env = gym.wrappers.RecordVideo(env, **video_kwargs)
 
-    # Reset and step with sinusoidal actions
-    obs, _ = env.reset()
-
     # Use step_dt (control timestep) instead of physics_dt for proper timing
     dt = env.unwrapped.step_dt
     timestep = 0
@@ -167,31 +177,97 @@ def main() -> None:
     print(f"[INFO] Number of environments: {num_envs}")
     print(f"[INFO] Action dimension: {action_dim}")
     print(f"[INFO] Control timestep: {dt:.4f}s ({1.0 / dt:.1f} Hz)")
-    print("[INFO] Generating sinusoidal actions for environment validation...")
 
-    while simulation_app.is_running():
-        start = time.time()
-        # Generate smooth sinusoidal actions
-        actions_np = generate_sinusoidal_actions(timestep, num_envs, action_dim, dt)
-        actions = torch.as_tensor(actions_np, dtype=torch.float32, device=env.unwrapped.device)
-        # Step
-        with torch.inference_mode():
+    if args_cli.validate_fallen_states:
+        print("[INFO] Validating fallen states with zero actions (resets every second)...")
+        reset_interval_steps = int(1.0 / dt)  # Reset every second
+    else:
+        print("[INFO] Generating sinusoidal actions for environment validation...")
+        reset_interval_steps = None
+
+    # Wrap entire simulation in inference_mode for performance
+    with torch.inference_mode():
+        # Initial reset
+        obs, _ = env.reset()
+
+        while simulation_app.is_running():
+            start = time.time()
+
+            if args_cli.validate_fallen_states:
+                # Zero actions for fallen state validation
+                actions = torch.zeros(num_envs, action_dim, device=env.unwrapped.device)
+                # Periodic reset to cycle through different fallen states
+                if reset_interval_steps and timestep > 0 and timestep % reset_interval_steps == 0:
+                    obs, _ = env.reset()
+                    print(f"[INFO] Reset at step {timestep} to show new fallen states")
+            else:
+                # Generate smooth sinusoidal actions
+                actions_np = generate_sinusoidal_actions(timestep, num_envs, action_dim, dt)
+                actions = torch.as_tensor(actions_np, dtype=torch.float32, device=env.unwrapped.device)
+
+            # Step
             obs, _, _, _, _ = env.step(actions)
 
-        # Increment timestep for sinusoidal trajectory
-        timestep += 1
+            # Increment timestep for sinusoidal trajectory
+            timestep += 1
 
-        if args_cli.video:
-            if timestep == args_cli.video_length:
-                break
+            if args_cli.video:
+                if timestep == args_cli.video_length:
+                    break
 
-        # Sleep to approximate real-time, if requested
-        if args_cli.real_time:
-            sleep_time = dt - (time.time() - start)
-            if sleep_time > 0:
-                time.sleep(sleep_time)
+            # Sleep to approximate real-time, if requested
+            if args_cli.real_time:
+                sleep_time = dt - (time.time() - start)
+                if sleep_time > 0:
+                    time.sleep(sleep_time)
 
     env.close()
+
+
+def _call_pre_learn_hook(env: ManagerBasedRLEnv, task_name: str) -> None:
+    """Call pre_learn hook if the task provides one.
+
+    This is needed for tasks that require setup before the first reset
+    (e.g., loading fallen state datasets for stand-up tasks).
+    """
+    import importlib
+
+    pre_learn_entry_point = gym.spec(task_name).kwargs.get("pre_learn_entry_point")
+    if pre_learn_entry_point is None:
+        return  # No pre_learn hook for this task
+
+    # Get agent config (required by pre_learn)
+    agent_cfg_entry_point = gym.spec(task_name).kwargs.get("rsl_rl_cfg_entry_point")
+    if agent_cfg_entry_point is None:
+        print(f"[WARN] Task {task_name} has pre_learn but no rsl_rl_cfg_entry_point, skipping")
+        return
+
+    mod_name, class_name = agent_cfg_entry_point.split(":")
+    mod = importlib.import_module(mod_name)
+    agent_cfg_class = getattr(mod, class_name)
+    agent_cfg = agent_cfg_class()
+
+    # Call pre_learn
+    mod_name, fn_name = pre_learn_entry_point.split(":")
+    mod = importlib.import_module(mod_name)
+    pre_learn_fn = getattr(mod, fn_name)
+    pre_learn_fn(env, task_name, agent_cfg)
+
+
+def _setup_fallen_state_validation(env: ManagerBasedRLEnv) -> None:
+    """Configure environment for fallen state validation.
+
+    Sets standing_ratio=0 so all resets use fallen states from the dataset.
+    """
+    # Check if reset_base term exists
+    term_exists = any("reset_base" in terms for terms in env.event_manager.active_terms.values())
+    if not term_exists:
+        print("[WARN] Fallen-state validation: 'reset_base' term not found; skipping standing_ratio override")
+        return
+
+    reset_term_cfg = env.event_manager.get_term_cfg("reset_base")
+    reset_term_cfg.params["standing_ratio"] = 0.0
+    print("[INFO] Fallen state validation mode: standing_ratio set to 0")
 
 
 if __name__ == "__main__":

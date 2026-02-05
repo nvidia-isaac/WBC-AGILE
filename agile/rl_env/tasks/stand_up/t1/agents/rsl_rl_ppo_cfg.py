@@ -16,9 +16,9 @@
 
 from isaaclab.utils import configclass
 
+from agile.rl_env.mdp.events import FallenStateDatasetCfg
 from agile.rl_env.mdp.symmetry import lr_mirror_T1  # noqa: F401
 from agile.rl_env.rsl_rl import (  # noqa: F401
-    RslRlL2C2Cfg,
     RslRlOnPolicyRunnerCfg,
     RslRlPpoActorCriticCfg,
     RslRlPpoAlgorithmCfg,
@@ -39,6 +39,7 @@ class T1StandUpPpoRunnerCfg(RslRlOnPolicyRunnerCfg):
     enable_entropy_coef_annealing = False
     entropy_coef_annealing_start_progress = 0.2
     enable_entropy_coef_annealing_success_rate = 0.9
+    fallen_state_dataset_cfg: FallenStateDatasetCfg | None = FallenStateDatasetCfg()
     policy = RslRlPpoActorCriticCfg(
         init_noise_std=1.0,
         actor_hidden_dims=[256, 256, 128],
@@ -62,9 +63,5 @@ class T1StandUpPpoRunnerCfg(RslRlOnPolicyRunnerCfg):
             use_data_augmentation=True,
             use_mirror_loss=False,
             data_augmentation_func=lr_mirror_T1,
-        ),
-        l2c2_cfg=RslRlL2C2Cfg(
-            lambda_actor=1.0,
-            lambda_critic=0.1,
         ),
     )

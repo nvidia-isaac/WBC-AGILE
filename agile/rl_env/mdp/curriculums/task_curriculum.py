@@ -13,7 +13,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-
 """Curriculum terms based on locomotion performance/ traveled distance."""
 
 from __future__ import annotations
@@ -24,15 +23,18 @@ from typing import TYPE_CHECKING
 
 import torch
 
+from isaaclab.actuators import ImplicitActuator
+from isaaclab.assets import Articulation
 from isaaclab.envs.mdp.actions import RelativeJointPositionAction
-from isaaclab.managers import EventTermCfg, ManagerTermBase
+from isaaclab.managers import EventTermCfg, ManagerTermBase, SceneEntityCfg
 from isaaclab.terrains import TerrainImporter
 
-from agile.rl_env.mdp import HarnessAction
+from agile.rl_env.mdp import HarnessAction, LiftAction
 
 if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedRLEnv
-
+    from isaaclab.envs.mdp.commands import UniformVelocityCommand
+    from isaaclab.sensors import RayCaster
 
 class terrain_levels_vel_curriculum(ManagerTermBase):
     """Curriculum based on the distance the robot walked when commanded to move at a desired velocity."""
@@ -97,7 +99,6 @@ class terrain_levels_vel_curriculum(ManagerTermBase):
         terrain.update_env_origins(env_ids, move_up, move_down)
         return torch.mean(terrain.terrain_levels.float())
 
-
 class terrain_levels_successful_termination(ManagerTermBase):
     """Curriculum based on how often the robot terminates due to the specified termination term."""
 
@@ -146,6 +147,78 @@ class terrain_levels_successful_termination(ManagerTermBase):
         terrain.update_env_origins(env_ids, move_up, move_down)
         return torch.mean(terrain.terrain_levels.float())
 
+class terrain_levels_standing_at_timeout(ManagerTermBase):
+    """Curriculum based on whether the robot is standing when the episode times out.
+
+    This curriculum is designed for stand-up tasks where success is defined as
+    being at standing height when the episode ends due to timeout (not early termination).
+    """
+
+    def __init__(self, cfg: EventTermCfg, env: ManagerBasedRLEnv):
+        super().__init__(cfg, env)
+        self.num_failures = torch.zeros(env.num_envs, device=env.device, dtype=torch.int32)
+        self.num_successes = torch.zeros(env.num_envs, device=env.device, dtype=torch.int32)
+
+    def __call__(
+        self,
+        env: ManagerBasedRLEnv,
+        env_ids: torch.Tensor,
+        min_height: float,
+        asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+        sensor_cfg: SceneEntityCfg | None = None,
+        n_failures: int = 3,
+        n_successes: int = 3,
+    ) -> torch.Tensor:
+        """Curriculum based on standing at timeout.
+
+        The robot moves to a more difficult terrain if it is standing at timeout
+        `n_successes` times and moves to simpler terrain if it fails `n_failures` times.
+
+        Args:
+            env: The environment.
+            env_ids: The environment IDs that are being reset.
+            min_height: Minimum height to be considered standing.
+            asset_cfg: Asset configuration for the robot.
+            sensor_cfg: Optional height sensor for rough terrain adjustment.
+            n_failures: Number of failures before moving to easier terrain.
+            n_successes: Number of successes before moving to harder terrain.
+
+        Returns:
+            The mean terrain level for the given environment ids.
+        """
+
+        terrain: TerrainImporter = env.scene.terrain
+
+        # Check if these envs timed out
+        is_timeout = env.termination_manager.time_outs[env_ids]
+
+        # Check current height for these envs
+        asset = env.scene[asset_cfg.name]
+        if sensor_cfg is not None:
+            sensor: RayCaster = env.scene[sensor_cfg.name]
+            current_height = asset.data.root_pos_w[env_ids, 2] - torch.mean(
+                sensor.data.ray_hits_w[env_ids, ..., 2], dim=1
+            )
+        else:
+            current_height = asset.data.root_pos_w[env_ids, 2]
+
+        is_standing = current_height > min_height
+
+        # Success = timeout AND standing
+        succeeded = is_timeout & is_standing
+
+        self.num_successes[env_ids] += succeeded
+        self.num_failures[env_ids] += ~succeeded
+
+        move_up = self.num_successes[env_ids] >= n_successes
+        move_down = self.num_failures[env_ids] >= n_failures
+
+        # Reset counters when moving up or down
+        self.num_failures[env_ids[move_up | move_down]] = 0
+        self.num_successes[env_ids[move_up | move_down]] = 0
+
+        terrain.update_env_origins(env_ids, move_up, move_down)
+        return torch.mean(terrain.terrain_levels.float())
 
 class action_limit_successful_termination(ManagerTermBase):
     """Curriculum based on the ratio of successful terminations."""
@@ -212,7 +285,6 @@ class action_limit_successful_termination(ManagerTermBase):
 
         return action_clip_abs.max().item()
 
-
 def remove_harness(
     env: ManagerBasedRLEnv,
     env_ids: Sequence[int],  # noqa: ARG001
@@ -253,6 +325,188 @@ def remove_harness(
 
         return scale  # type: ignore
 
+class adaptive_lift_curriculum(ManagerTermBase):
+    """Adaptive curriculum that adjusts lift forces based on whether robots learn to stand up.
+
+    This curriculum tracks the MAXIMUM height reached during each episode, not the height
+    at termination. This decouples "learning to stand up" from "learning to balance":
+    - Standing up = reaching standing height at any point during the episode
+    - Balancing = staying up after standing (separate skill, doesn't need lift)
+
+    If enough robots managed to stand up at least once during their episode, the lift
+    forces are reduced. This provides better RL guidance because:
+    - Robots aren't punished for attempting to stand and then falling
+    - The lift helps with learning to stand up, not with balancing
+    - Once the robot can reach standing height, the lift's job is done
+
+    The curriculum uses EMA smoothing to reduce noise from individual episodes.
+    """
+
+    def __init__(self, cfg: EventTermCfg, env: ManagerBasedRLEnv):
+        super().__init__(cfg, env)
+        self._standing_ratio_ema = 0.0
+        self._force_scale = 1.0
+
+        # Get the lift action reference (which tracks max heights)
+        self._lift_action: LiftAction = env.action_manager._terms[cfg.params["lift_action_name"]]
+
+    def __call__(
+        self,
+        env: ManagerBasedRLEnv,  # noqa: ARG002
+        env_ids: torch.Tensor,
+        lift_action_name: str,  # noqa: ARG002
+        standing_height_threshold: float,
+        standing_ratio_to_decrease: float = 0.8,
+        standing_ratio_to_increase: float = 0.6,
+        ema_alpha: float = 0.01,
+        epsilon: float = 0.001,
+        force_scale_disable_threshold: float = 0.01,
+        force_scale_reenable_value: float = 0.1,
+        only_decrease: bool = False,
+    ) -> float:
+        """Update lift force scale based on whether robots stood up during their episode.
+
+        Args:
+            env: The learning environment.
+            env_ids: Environment IDs that are being reset.
+            lift_action_name: Name of the lift action term.
+            standing_height_threshold: Height above which robot counts as having "stood up".
+            standing_ratio_to_decrease: Decrease forces if EMA > this (hysteresis upper).
+            standing_ratio_to_increase: Increase forces if EMA < this (hysteresis lower).
+                Ignored if only_decrease=True.
+            ema_alpha: Smoothing factor for standing ratio EMA. Smaller = smoother.
+            epsilon: Adjustment rate per update. Force scale *= (1 - epsilon).
+            force_scale_disable_threshold: Set scale to 0 when it drops below this.
+            force_scale_reenable_value: Set scale to this when re-enabling from 0.
+                Ignored if only_decrease=True.
+            only_decrease: If True, forces can only decrease, never increase.
+                The curriculum becomes one-way: once reduced, it stays reduced.
+
+        Returns:
+            Current force scale [0, 1].
+        """
+        if len(env_ids) == 0:
+            return self._force_scale
+
+        # Get max heights achieved during the episodes that just ended
+        # (tracked by the lift action every step)
+        max_heights = self._lift_action.max_heights[env_ids]
+
+        # Count how many robots managed to stand up at least once
+        stood_up_mask = max_heights > standing_height_threshold
+        num_episodes = len(env_ids)
+        num_stood_up = stood_up_mask.sum().item()
+
+        # Calculate standing ratio for this batch
+        standing_ratio = num_stood_up / num_episodes
+
+        # Update EMA
+        self._standing_ratio_ema = ema_alpha * standing_ratio + (1 - ema_alpha) * self._standing_ratio_ema
+
+        # Adjust force scale based on standing ratio
+        if self._standing_ratio_ema > standing_ratio_to_decrease:
+            # Robots are learning to stand up, reduce forces
+            if self._force_scale > 0:
+                self._force_scale *= 1 - epsilon
+                # Check if below threshold, disable entirely
+                if self._force_scale < force_scale_disable_threshold:
+                    self._force_scale = 0.0
+
+        elif not only_decrease and self._standing_ratio_ema < standing_ratio_to_increase:
+            # Struggling and allowed to increase forces
+            if self._force_scale == 0:
+                # Re-enable from zero
+                self._force_scale = force_scale_reenable_value
+            else:
+                self._force_scale *= 1 + epsilon
+                # Clamp to max of 1.0
+                self._force_scale = min(self._force_scale, 1.0)
+
+        # Apply the updated scale to the lift action
+        self._lift_action.scale_forces(self._force_scale)
+
+        return self._force_scale
+
+class update_event_range_step(ManagerTermBase):
+    """Curriculum to update event parameter ranges given the iteration.
+
+    This curriculum linearly interpolates between start and terminal ranges
+    based on training steps, useful for gradually increasing randomization
+    like object pose ranges.
+    """
+
+    def __init__(self, cfg: EventTermCfg, env: ManagerBasedRLEnv):
+        super().__init__(cfg, env)
+        self.event_term: str = cfg.params["event_term"]
+        self.param_name: str = cfg.params["param_name"]
+
+        # Get the original parameter structure (could be dict of tuples)
+        self.original_param = env.event_manager.get_term_cfg(self.event_term).params[self.param_name]
+
+        # Store start and terminal ranges
+        self.start_range: dict[str, tuple[float, float]] = cfg.params["start_range"]
+        self.terminal_range: dict[str, tuple[float, float]] = cfg.params["terminal_range"]
+
+        # Set initial range
+        self._update_range(env, 0.0)
+
+    def _interpolate_range(
+        self, start: tuple[float, float], terminal: tuple[float, float], scale: float
+    ) -> tuple[float, float]:
+        """Linearly interpolate between start and terminal range."""
+        return (
+            start[0] + (terminal[0] - start[0]) * scale,
+            start[1] + (terminal[1] - start[1]) * scale,
+        )
+
+    def _update_range(self, env: ManagerBasedRLEnv, scale: float) -> dict:
+        """Update the event parameter with interpolated ranges."""
+        new_range = {}
+        for key in self.original_param:
+            if key in self.start_range and key in self.terminal_range:
+                new_range[key] = self._interpolate_range(self.start_range[key], self.terminal_range[key], scale)
+            else:
+                # Keep original value for keys not specified
+                new_range[key] = self.original_param[key]
+
+        env.event_manager.get_term_cfg(self.event_term).params[self.param_name] = new_range
+        return new_range
+
+    def __call__(
+        self,
+        env: ManagerBasedRLEnv,
+        env_ids: Sequence[int],  # noqa: ARG002
+        event_term: str,  # noqa: ARG002
+        param_name: str,  # noqa: ARG002
+        start_range: dict[str, tuple[float, float]],  # noqa: ARG002
+        terminal_range: dict[str, tuple[float, float]],  # noqa: ARG002
+        start_step: int,
+        num_steps: int,
+    ) -> float:
+        """Update event parameter range linearly over training steps.
+
+        Args:
+            env: The learning environment.
+            env_ids: Not used since all environments are affected.
+            event_term: Name of the event term to update.
+            param_name: Name of the parameter to update (e.g., "pose_range").
+            start_range: Starting range dict (e.g., {"x": (-0.01, 0.01), "y": (-0.01, 0.01)}).
+            terminal_range: Terminal range dict (e.g., {"x": (-0.1, 0.1), "y": (-0.1, 0.1)}).
+            start_step: When to start updating.
+            num_steps: How long to update.
+
+        Returns:
+            Current interpolation scale (0.0 to 1.0).
+        """
+        if env.common_step_counter <= start_step:
+            return 0.0
+        elif env.common_step_counter > start_step + num_steps:
+            self._update_range(env, 1.0)
+            return 1.0
+        else:
+            scale: float = (env.common_step_counter - start_step) / num_steps
+            self._update_range(env, scale)
+            return scale
 
 class update_reward_weight_step(ManagerTermBase):
     """Curriculum to update reward weights given the iteration."""
