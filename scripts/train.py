@@ -175,6 +175,16 @@ def main(
         print_dict(video_kwargs, nesting=4)
         env = gym.wrappers.RecordVideo(env, **video_kwargs)
 
+    # Call pre_learn hook if the task provides one
+    pre_learn_entry_point = gym.spec(args_cli.task).kwargs.get("pre_learn_entry_point")
+    if pre_learn_entry_point is not None:
+        import importlib
+
+        mod_name, fn_name = pre_learn_entry_point.split(":")
+        mod = importlib.import_module(mod_name)
+        pre_learn_fn = getattr(mod, fn_name)
+        pre_learn_fn(env.unwrapped, args_cli.task, agent_cfg)
+
     # wrap around environment for rsl-rl
     env = RslRlVecEnvWrapper(env, clip_actions=agent_cfg.clip_actions)
 

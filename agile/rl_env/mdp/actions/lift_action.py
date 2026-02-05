@@ -36,10 +36,12 @@ class LiftAction(ActionTerm):
     """
     Lift action to help a bipedal robot to stand up.
 
-    Applies external forces to lift the robot up by a simple pd law on a target height
-    that increases linearly over time.
-    We then use a curiculum to reduce the forces applied to the robot.
-    This way we teach the robot to stand up and walk without falling over.
+    Applies external forces to lift the robot up by a simple PD law on a target height
+    that increases linearly over time. Also applies angular velocity damping to prevent
+    spinning.
+
+    Use a curriculum (e.g., `remove_harness` or `adaptive_lift_curriculum`) to reduce
+    the forces over time as the robot learns to stand up on its own.
     """
 
     cfg: LiftActionCfg
@@ -55,10 +57,18 @@ class LiftAction(ActionTerm):
         self.stiffness_forces = cfg.stiffness_forces
         self.damping_forces = cfg.damping_forces
         self._force_limit = cfg.force_limit
+        self.damping_torques = cfg.damping_torques
+        self._torque_limit = cfg.torque_limit
         # height sensor
         self._height_sensor: RayCaster = env.scene.sensors[cfg.height_sensor]
         self._lift_link_id, _ = self._asset.find_bodies(cfg.link_to_lift)
         self._is_disabled = False
+
+        # Force scale for curriculum (1.0 = full force, 0.0 = disabled)
+        self._force_scale = 1.0
+
+        # Track max height achieved per environment during episode (for curriculum)
+        self._max_heights = torch.zeros(env.num_envs, device=env.device)
 
     @property
     def action_dim(self) -> int:
@@ -72,18 +82,48 @@ class LiftAction(ActionTerm):
     def processed_actions(self) -> torch.Tensor:
         return torch.empty(0, device=self.device)
 
+    @property
+    def force_scale(self) -> float:
+        """Current force scale for logging/monitoring."""
+        return self._force_scale
+
+    @property
+    def max_heights(self) -> torch.Tensor:
+        """Max height achieved per environment during current episode.
+
+        Used by adaptive_lift_curriculum to determine if robot successfully
+        stood up at any point (even if it fell afterwards).
+        """
+        return self._max_heights
+
     def scale_forces(self, scale: float) -> None:
-        """Scale the force and torque limits, useful for curriculum."""
-        self.stiffness_forces = self.cfg.stiffness_forces * scale
-        self.damping_forces = self.cfg.damping_forces * scale
-        self._force_limit = self.cfg.force_limit * scale
-        self._is_disabled = scale <= 0
+        """Scale all force and torque parameters by the given scale.
+
+        Called by curriculum terms to adjust the lift assistance over training.
+
+        Args:
+            scale: Scale factor in [0, 1]. 0 = disabled, 1 = full force.
+        """
+        self._force_scale = scale
+        self.stiffness_forces = self.cfg.stiffness_forces * self._force_scale
+        self.damping_forces = self.cfg.damping_forces * self._force_scale
+        self._force_limit = self.cfg.force_limit * self._force_scale
+        self.damping_torques = self.cfg.damping_torques * self._force_scale
+        self._torque_limit = self.cfg.torque_limit * self._force_scale
+        self._is_disabled = self._force_scale <= 0
 
     def process_actions(self, actions: torch.Tensor) -> None:
         # store the raw actions
         self._raw_actions = actions
 
     def apply_actions(self) -> None:
+        # Always compute and track height (even when disabled) for curriculum
+        height = self._asset.data.root_pos_w[:, 2].unsqueeze(1) - self._height_sensor.data.ray_hits_w[..., 2]
+        height = torch.mean(height, dim=-1)
+
+        # Track max height achieved during episode
+        self._max_heights = torch.maximum(self._max_heights, height)
+
         if self._is_disabled:
             return
 
@@ -96,9 +136,6 @@ class LiftAction(ActionTerm):
 
         # find the error in local frame of root
         forces = torch.zeros_like(self._asset.data.root_lin_vel_b)
-
-        height = self._asset.data.root_pos_w[:, 2].unsqueeze(1) - self._height_sensor.data.ray_hits_w[..., 2]
-        height = torch.mean(height, dim=-1)
         # calculate the height error
         height_error = target_height - height  # (N, 1)
         # apply the height error to the forces
@@ -106,14 +143,26 @@ class LiftAction(ActionTerm):
         # limit the forces
         forces = torch.clamp(forces, 0.0, self._force_limit).unsqueeze(1)
 
-        # rotate forces to body frame
+        # Angular velocity damping (D term) - only on z-axis (yaw) in world frame
+        # This prevents fast spinning while allowing roll/pitch for balance
+        torques_w = torch.zeros_like(self._asset.data.root_ang_vel_w)
+        if self.damping_torques > 0:
+            # Get angular velocity in world frame and damp only z-component
+            ang_vel_z = self._asset.data.root_ang_vel_w[:, 2]
+            torques_w[:, 2] = -self.damping_torques * ang_vel_z
+            # Clamp torques
+            torques_w[:, 2] = torch.clamp(torques_w[:, 2], -self._torque_limit, self._torque_limit)
+
+        # rotate forces and torques to body frame
         link_quat = self._asset.data.body_quat_w[:, self._lift_link_id].squeeze(1)
-
         forces_b = math_utils.quat_apply_inverse(link_quat, forces)
+        torques_b = math_utils.quat_apply_inverse(link_quat, torques_w.unsqueeze(1))
 
-        self._asset.set_external_force_and_torque(
-            forces=forces_b, torques=torch.zeros_like(forces_b), body_ids=self._lift_link_id
-        )
+        self._asset.set_external_force_and_torque(forces=forces_b, torques=torques_b, body_ids=self._lift_link_id)
 
     def reset(self, env_ids: Sequence[int] | None = None) -> None:
-        pass  # No reset needed for this action term
+        # Reset max heights for environments that are resetting
+        if env_ids is None:
+            self._max_heights[:] = 0.0
+        else:
+            self._max_heights[env_ids] = 0.0

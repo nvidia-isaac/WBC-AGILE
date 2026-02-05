@@ -19,7 +19,6 @@ from isaaclab.utils import configclass
 from agile.rl_env.mdp.events import FallenStateDatasetCfg
 from agile.rl_env.mdp.symmetry import lr_mirror_T1  # noqa: F401
 from agile.rl_env.rsl_rl import (  # noqa: F401
-    RslRlL2C2Cfg,
     RslRlOnPolicyRunnerCfg,
     RslRlPpoActorCriticCfg,
     RslRlPpoAlgorithmCfg,

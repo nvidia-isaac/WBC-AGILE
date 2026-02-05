@@ -69,6 +69,9 @@ def new_step(self: ManagerBasedRLEnv, action: torch.Tensor) -> VecEnvStepReturn:
     self.common_step_counter += 1  # total step (common for all envs)
     # -- check terminations
     self.reset_buf = self.termination_manager.compute()
+    # Skip resets if terminations are disabled (e.g., during fallen state collection)
+    if getattr(self, "_disable_terminations", False):
+        self.reset_buf = torch.zeros_like(self.reset_buf)
     self.reset_terminated = self.termination_manager.terminated
     self.reset_time_outs = self.termination_manager.time_outs
     # -- reward computation

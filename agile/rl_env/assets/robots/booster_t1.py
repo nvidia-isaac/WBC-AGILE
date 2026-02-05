@@ -33,7 +33,6 @@ WAIST_JOINT_NAMES = [
 ARM_JOINT_NAMES = [
     ".*Shoulder.*",
     ".*Elbow.*",
-    ".*Wrist.*",
 ]
 
 HEAD_JOINT_NAMES = [

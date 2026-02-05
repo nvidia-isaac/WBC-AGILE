@@ -13,7 +13,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-
 from dataclasses import MISSING, field
 from typing import Literal
 
@@ -41,7 +40,6 @@ from .velocity_profiles import (
 ##
 # Joint actions.
 ##
-
 
 @configclass
 class RandomActionCfg(mdp.JointActionCfg):
@@ -80,7 +78,6 @@ class RandomActionCfg(mdp.JointActionCfg):
     """Dictionary mapping joint names to custom position limits (lower_limit, upper_limit).
     If provided, overrides the default joint limits from the robot asset. Defaults to None."""
 
-
 @configclass
 class JointPositionGUIActionCfg(mdp.JointActionCfg):
     """Configuration for the joint position action term.
@@ -98,8 +95,8 @@ class JointPositionGUIActionCfg(mdp.JointActionCfg):
     If True, this flag results in overwriting the values of :attr:`offset` to the default joint positions
     from the articulation asset.
     """
-    max_stiffness: float = 500.0
-    """Maximum stiffness for the P-gain slider. Defaults to 500.0."""
+    max_stiffness: float = 200.0
+    """Maximum stiffness for the P-gain slider. Defaults to 200.0."""
     max_damping: float = 25.0
     """Maximum damping for the D-gain slider. Defaults to 25.0."""
 
@@ -108,7 +105,6 @@ class JointPositionGUIActionCfg(mdp.JointActionCfg):
 
     robot_type: Literal["t1", "g1"] = "t1"
     """The type of robot to use. Defaults to 't1'."""
-
 
 @configclass
 class HarnessActionCfg(ActionTermCfg):
@@ -142,32 +138,37 @@ class HarnessActionCfg(ActionTermCfg):
     command_name: str | None = None
     """Name of the command term for height commands (e.g., 'base_velocity'). If None, uses fixed target_height."""
 
-
 @configclass
 class LiftActionCfg(ActionTermCfg):
     """Action term to simulate a lift.
 
-    Applies external forces to lift the robot up.
+    Applies external forces to lift the robot up and torques to damp angular velocity.
+    Use with a curriculum term (e.g., `remove_harness` or `adaptive_lift_curriculum`)
+    to reduce forces over training.
     """
 
     class_type: type[ActionTerm] = LiftAction
     """The type of the action term."""
     link_to_lift: str = MISSING
-    """The name of the root joint of the articulation."""
+    """The name of the link to apply lift forces to."""
     stiffness_forces: float = 0.0
-    """The stiffness of the forces applied by the harness. Defaults to 0.0."""
+    """The stiffness (P gain) for height tracking. Defaults to 0.0."""
     damping_forces: float = 0.0
-    """The damping of the forces applied by the harness. Defaults to 0.0."""
+    """The damping (D gain) for height tracking. Defaults to 0.0."""
     force_limit: float = 0.0
-    """The force limit of the harness. Defaults to 0.0."""
+    """The maximum force to apply. Defaults to 0.0."""
+    damping_torques: float = 0.0
+    """The damping for angular velocity (D term). Applies torques opposing yaw rotation. Defaults to 0.0."""
+    torque_limit: float = 0.0
+    """The maximum torque for angular damping. Defaults to 0.0."""
     height_sensor: str = "height_measurement_sensor"
-    """The name of the height sensor to use for the harness action. Defaults to "height measurement_sensor"."""
+    """The name of the height sensor. Defaults to "height_measurement_sensor"."""
     target_height: float = 0.71
-    """The target height of the harness action. Defaults to 0.71."""
+    """The target standing height. Defaults to 0.71."""
     height_command: str | None = None
-    """If a heights are commanded, the command term can be added here"""
+    """Optional command term name for dynamic height targets."""
     start_lifting_time_s: float = 0.0
-    """After how many seconds the lift should start"""
+    """Delay before lifting starts (seconds). Defaults to 0.0."""
     lifting_duration_s: float = 10.0
     """How many seconds the lift should take to move from start to end"""
 

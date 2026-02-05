@@ -28,6 +28,14 @@ Example usage:
 python scripts/play.py --task Velocity-T1-v0 --num_envs 32
 ```
 
+**Fallen State Validation Mode:**
+
+For tasks with pre-collected fallen states (e.g., StandUp-T1-v0), you can validate the collected dataset:
+```bash
+python scripts/play.py --task StandUp-T1-v0 --num_envs 16 --validate-fallen-states
+```
+This loads the fallen state dataset and visualizes the collected poses with zero actions, resetting every 3 seconds to show different states. Useful for verifying the diversity and quality of collected fallen poses before training.
+
 ### `sim2mujoco_eval.py`
 Evaluation script for Sim2Sim transfer to MuJoCo. Runs trained policies in MuJoCo simulation to verify transfer performance before real hardware deployment. This is a **generic framework** that works with any task by automatically parsing the I/O descriptor YAML file.
 

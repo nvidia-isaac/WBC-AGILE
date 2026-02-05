@@ -135,6 +135,23 @@ Tasks for learning to recover from arbitrary fallen poses and stand up. Uses ful
 |---------|-------------------|-------------|----------|--------------|----------------|
 | `StandUp-T1-v0` | Full body (all joints) | Teacher (Non-Privileged) | None | History (5 steps) | Delayed DC Motor |
 
+**Pre-collected Fallen States:**
+
+The stand-up task uses a pre-collected dataset of fallen robot states for efficient episode resets. Instead of simulating the robot falling at the start of each episode (which takes ~2 seconds), states are sampled from the dataset for instant resets.
+
+- **Automatic collection**: The `pre_learn` hook automatically collects/loads fallen states before training starts
+- **Caching**: Collected states are cached to disk and reused across training runs (cache invalidates when terrain config changes)
+- **Validation**: Use `python scripts/play.py --task StandUp-T1-v0 --validate-fallen-states` to visualize the collected poses
+
+Configuration in `agents/rsl_rl_ppo_cfg.py`:
+```python
+fallen_state_dataset_cfg: FallenStateDatasetCfg = FallenStateDatasetCfg(
+    num_spawns_per_level=2,  # States collected per terrain level
+    fall_duration_s=2.5,      # Simulation time for falling
+    cache_enabled=True,       # Enable disk caching
+)
+```
+
 ---
 
 ### 4. Pick and Place (`pick_place/`)

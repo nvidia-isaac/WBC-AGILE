@@ -28,5 +28,6 @@ gym.register(
     kwargs={
         "env_cfg_entry_point": f"{__name__}.stand_up_env_cfg:T1StandUpEnvCfg",
         "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_rl_ppo_cfg:T1StandUpPpoRunnerCfg",
+        "pre_learn_entry_point": f"{__name__}.pre_learn:pre_learn",
     },
 )
