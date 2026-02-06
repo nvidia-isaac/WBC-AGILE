@@ -333,17 +333,6 @@ class RewardsCfg:
         params={"asset_cfg": SceneEntityCfg("robot", body_names="Trunk")},
     )
 
-    # Termination
-    stand_up_termination = RewTerm(
-        func=mdp.standing_at_timeout,
-        weight=250.0,
-        params={
-            "min_height": booster_t1.DEFAULT_TRUNK_HEIGHT * 0.8,
-            "asset_cfg": SceneEntityCfg("robot"),
-            "sensor_cfg": SceneEntityCfg("height_measurement_sensor"),
-        },
-    )
-
     no_height_progress_termination = RewTerm(
         func=mdp.is_terminated_term,
         weight=-5.0,

@@ -224,7 +224,7 @@ def main() -> None:
     env.close()
 
 
-def _call_pre_learn_hook(env: ManagerBasedRLEnv, task_name: str) -> None:
+def _call_pre_learn_hook(env, task_name: str, agent_cfg=None) -> None:
     """Call pre_learn hook if the task provides one.
 
     This is needed for tasks that require setup before the first reset
@@ -236,16 +236,15 @@ def _call_pre_learn_hook(env: ManagerBasedRLEnv, task_name: str) -> None:
     if pre_learn_entry_point is None:
         return  # No pre_learn hook for this task
 
-    # Get agent config (required by pre_learn)
-    agent_cfg_entry_point = gym.spec(task_name).kwargs.get("rsl_rl_cfg_entry_point")
-    if agent_cfg_entry_point is None:
-        print(f"[WARN] Task {task_name} has pre_learn but no rsl_rl_cfg_entry_point, skipping")
-        return
-
-    mod_name, class_name = agent_cfg_entry_point.split(":")
-    mod = importlib.import_module(mod_name)
-    agent_cfg_class = getattr(mod, class_name)
-    agent_cfg = agent_cfg_class()
+    if agent_cfg is None:
+        # Construct agent config from task spec
+        agent_cfg_entry_point = gym.spec(task_name).kwargs.get("rsl_rl_cfg_entry_point")
+        if agent_cfg_entry_point is None:
+            print(f"[WARN] Task {task_name} has pre_learn but no rsl_rl_cfg_entry_point, skipping")
+            return
+        mod_name, class_name = agent_cfg_entry_point.split(":")
+        mod = importlib.import_module(mod_name)
+        agent_cfg = getattr(mod, class_name)()
 
     # Call pre_learn
     mod_name, fn_name = pre_learn_entry_point.split(":")

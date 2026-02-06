@@ -29,9 +29,9 @@ from agile.rl_env.mdp.utils import (
     get_contact_sensor_cfg,
     get_robot_cfg,
     transform_to_asset_frame,
-    transform_to_body_frame,
 )
 from agile.rl_env.utils import math_utils as agile_math_utils
+
 
 class body_acc_l2(ManagerTermBase):
     """Penalize body linear and angular accelerations using velocity history tracking (Isaac Gym style).
@@ -155,6 +155,7 @@ def body_ang_vel_l2(
     # Compute L2 penalty (sum of squared angular velocities)
     return torch.sum(torch.square(ang_vel), dim=-1)
 
+
 def if_standing(
     env: ManagerBasedRLEnv,
     standing_height_threshold: float,
@@ -185,6 +186,7 @@ def if_standing(
     is_standing = current_height > standing_height_threshold
     return is_standing.float()
 
+
 def feet_roll_l2(
     env: ManagerBasedRLEnv,
     asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
@@ -209,6 +211,7 @@ def feet_roll_l2(
 
     # Return sum of squared roll angles (Isaac Gym style)
     return torch.sum(torch.square(feet_roll), dim=-1)
+
 
 def feet_yaw_diff_l2(
     env: ManagerBasedRLEnv,
@@ -270,6 +273,7 @@ def feet_yaw_diff_l2(
         penalty = penalty * scale_factor
 
     return penalty
+
 
 def feet_yaw_mean_vs_base(
     env: ManagerBasedRLEnv,
@@ -338,6 +342,7 @@ def feet_yaw_mean_vs_base(
 
     return penalty
 
+
 def feet_yaw_mean_vs_base_if_standing(
     env: ManagerBasedRLEnv,
     standing_height_threshold: float,
@@ -352,13 +357,14 @@ def feet_yaw_mean_vs_base_if_standing(
     is_standing = if_standing(env, standing_height_threshold, asset_cfg, sensor_cfg)
     return angle_error_squared * is_standing
 
+
 def feet_distance_from_ref(
     env: ManagerBasedRLEnv,
     asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
     ref_distance: float = 0.2,
     command_name: str | None = None,
     lateral_velocity_threshold: float = 0.5,
-    norm: Literal["l1", "l2"] = "l1",
+    norm: Literal["l1", "l2"] = "l2",
 ) -> torch.Tensor:
     """Penalize feet lateral distance deviation from reference distance.
 
@@ -409,6 +415,7 @@ def feet_distance_from_ref(
     else:
         raise ValueError(f"Invalid norm: {norm}. Must be 'l1' or 'l2'.")
 
+
 def feet_distance_from_ref_if_standing(
     env: ManagerBasedRLEnv,
     standing_height_threshold: float,
@@ -417,13 +424,14 @@ def feet_distance_from_ref_if_standing(
     command_name: str | None = None,
     lateral_velocity_threshold: float = 0.5,
     sensor_cfg: SceneEntityCfg | None = None,
-    norm: Literal["l1", "l2"] = "l1",
+    norm: Literal["l1", "l2"] = "l2",
 ) -> torch.Tensor:
     distance_error = feet_distance_from_ref(
         env, asset_cfg, ref_distance, command_name, lateral_velocity_threshold, norm
     )
     is_standing = if_standing(env, standing_height_threshold, asset_cfg, sensor_cfg)
     return distance_error * is_standing
+
 
 def jumping(env: ManagerBasedRLEnv, threshold: float, sensor_cfg: SceneEntityCfg) -> torch.Tensor:
     """Penalize if no foot is in contact with the ground.
@@ -440,6 +448,7 @@ def jumping(env: ManagerBasedRLEnv, threshold: float, sensor_cfg: SceneEntityCfg
     is_jumping = not_in_contact.all(dim=1)
 
     return is_jumping.float()
+
 
 def impact_velocity_l1(
     env: ManagerBasedRLEnv, sensor_cfg: SceneEntityCfg, force_threshold: float = 10.0
@@ -468,6 +477,7 @@ def impact_velocity_l1(
 
     return impact_velocities
 
+
 def no_undersired_base_velocity_exp(
     env: ManagerBasedRLEnv,
     asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
@@ -479,6 +489,7 @@ def no_undersired_base_velocity_exp(
     ang_vel_xy = torch.sum(torch.square(asset.data.root_ang_vel_b[:, :2]), dim=1)
     reward = torch.exp(-(lin_vel_z + ang_vel_xy) / std**2)
     return reward
+
 
 def no_undersired_base_velocity_exp_if_null_cmd(
     env: ManagerBasedRLEnv,
@@ -501,6 +512,7 @@ def no_undersired_base_velocity_exp_if_null_cmd(
     reward = torch.exp(-(lin_vel_z + ang_vel_xy) / std**2)
     return reward
 
+
 def equal_foot_force(env: ManagerBasedRLEnv, sensor_cfg: SceneEntityCfg) -> torch.Tensor:
     """Reward if the z-component of the force on each foot is equal.
 
@@ -519,6 +531,7 @@ def equal_foot_force(env: ManagerBasedRLEnv, sensor_cfg: SceneEntityCfg) -> torc
 
     return reward
 
+
 def equal_foot_force_if_standing(
     env: ManagerBasedRLEnv,
     sensor_cfg: SceneEntityCfg,
@@ -530,6 +543,7 @@ def equal_foot_force_if_standing(
     reward = equal_foot_force(env, sensor_cfg)
     is_standing = if_standing(env, standing_height_threshold, asset_cfg, height_measurement_sensor)
     return reward * is_standing
+
 
 def equal_foot_force_if_null_cmd(env: ManagerBasedRLEnv, command_name: str, sensor_cfg: SceneEntityCfg) -> torch.Tensor:
     """Reward if the z-component of the force on each foot is equal.
@@ -553,6 +567,7 @@ def equal_foot_force_if_null_cmd(env: ManagerBasedRLEnv, command_name: str, sens
     reward = 1.0 - torch.abs(force_distribution - ideal_distribution).mean(dim=1) / (2 * ideal_distribution)
 
     return reward * is_null_cmd.float()
+
 
 def stand_with_both_feet_if_null_cmd(
     env: ManagerBasedRLEnv,
@@ -582,6 +597,7 @@ def stand_with_both_feet_if_null_cmd(
 
     return reward
 
+
 def foot_orientation_l1(
     env: ManagerBasedRLEnv,
     asset_cfg: SceneEntityCfg,
@@ -607,6 +623,7 @@ def foot_orientation_l1(
         + yaw.abs().mean(dim=1) * yaw_weight
     )
 
+
 def moving(
     env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg, weight_lin: float = 1.0, weight_ang: float = 1.0
 ) -> torch.Tensor:
@@ -617,6 +634,7 @@ def moving(
 
     penalty = lin_vels.mean(dim=1) * weight_lin + ang_vels.mean(dim=1) * weight_ang
     return penalty
+
 
 def moving_if_standing(
     env: ManagerBasedRLEnv,
@@ -631,6 +649,7 @@ def moving_if_standing(
     penalty = moving(env, asset_cfg, weight_lin, weight_ang)
     is_standing = if_standing(env, standing_height_threshold, asset_cfg, sensor_cfg)
     return penalty * is_standing
+
 
 def flat_body_orientation_exp(
     env: ManagerBasedRLEnv, std: float, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")
@@ -653,6 +672,7 @@ def flat_body_orientation_exp(
 
     return torch.exp(-orientation_error_per_env / std**2)
 
+
 def flat_orientation_if_null_cmd(
     env: ManagerBasedRLEnv,
     command_name: str,
@@ -669,6 +689,7 @@ def flat_orientation_if_null_cmd(
     penalty = torch.where(is_null_cmd, orientation_error, 0.0)
 
     return penalty
+
 
 def feet_stumble(
     env: ManagerBasedRLEnv,
@@ -710,6 +731,7 @@ def feet_stumble(
     # Compute reward
     reward = torch.relu(max_horizontal_forces - threshold)
     return reward
+
 
 def feet_slip(
     env: ManagerBasedRLEnv,
