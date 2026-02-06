@@ -21,7 +21,6 @@ from typing import TYPE_CHECKING
 
 import torch
 
-import isaaclab.utils.math as math_utils
 from isaaclab.assets.articulation import Articulation
 from isaaclab.managers.action_manager import ActionTerm
 from isaaclab.sensors import RayCaster
@@ -153,12 +152,10 @@ class LiftAction(ActionTerm):
             # Clamp torques
             torques_w[:, 2] = torch.clamp(torques_w[:, 2], -self._torque_limit, self._torque_limit)
 
-        # rotate forces and torques to body frame
-        link_quat = self._asset.data.body_quat_w[:, self._lift_link_id].squeeze(1)
-        forces_b = math_utils.quat_apply_inverse(link_quat, forces)
-        torques_b = math_utils.quat_apply_inverse(link_quat, torques_w.unsqueeze(1))
-
-        self._asset.set_external_force_and_torque(forces=forces_b, torques=torques_b, body_ids=self._lift_link_id)
+        # Apply forces and torques in world frame
+        self._asset.set_external_force_and_torque(
+            forces=forces, torques=torques_w.unsqueeze(1), body_ids=self._lift_link_id, is_global=True
+        )
 
     def reset(self, env_ids: Sequence[int] | None = None) -> None:
         # Reset max heights for environments that are resetting

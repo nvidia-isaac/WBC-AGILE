@@ -18,119 +18,12 @@ import torch
 from isaaclab.assets import RigidObject
 from isaaclab.envs import ManagerBasedRLEnv
 from isaaclab.managers import SceneEntityCfg
-from isaaclab.sensors import ContactSensor, RayCaster
+from isaaclab.sensors import RayCaster
 from isaaclab.utils.math import quat_apply_inverse, yaw_quat
 
-from agile.rl_env.mdp.commands import UniformVelocityBaseHeightCommand, UniformVelocityGaitBaseHeightCommand
+from agile.rl_env.mdp.commands import UniformVelocityBaseHeightCommand
 from agile.rl_env.mdp.utils import get_contact_sensor_cfg, get_robot_cfg
 
-def standing_at_timeout(
-    env: ManagerBasedRLEnv,
-    min_height: float,
-    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
-    sensor_cfg: SceneEntityCfg | None = None,
-) -> torch.Tensor:
-    """Reward for being at standing height when the episode times out.
-
-    This reward gives a bonus when the episode ends due to timeout AND the robot
-    is currently standing at or above the minimum height. This encourages:
-    1. Standing up
-    2. Staying standing for the entire episode duration
-
-    Args:
-        env: The environment.
-        min_height: Minimum height to be considered standing.
-        asset_cfg: Asset configuration for the robot.
-        sensor_cfg: Optional height sensor for rough terrain adjustment.
-
-    Returns:
-        1.0 if timeout AND standing, 0.0 otherwise.
-    """
-    # Check if this is a timeout termination
-    is_timeout = env.termination_manager.time_outs
-
-    # Get current height
-    asset: RigidObject = env.scene[asset_cfg.name]
-    if sensor_cfg is not None:
-        sensor: RayCaster = env.scene[sensor_cfg.name]
-        current_height = asset.data.root_pos_w[:, 2] - torch.mean(sensor.data.ray_hits_w[..., 2], dim=1)
-    else:
-        current_height = asset.data.root_pos_w[:, 2]
-
-    is_standing = current_height > min_height
-
-    # Reward only when timeout AND standing
-    return (is_timeout & is_standing).float()
-
-def static_at_goal_exp(
-    env: ManagerBasedRLEnv,
-    command_name: str,
-    progress_threshold: float = 0.8,
-    joint_vel_std: float = 0.5,
-    root_vel_std: float = 0.2,
-    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
-) -> torch.Tensor:
-    """Reward being static (low velocities) when late in the trajectory.
-
-    This reward encourages the robot to settle and stop moving toward the end of the
-    trajectory. Uses trajectory progress as the gate instead of position threshold,
-    ensuring the reward always activates at the end of each episode.
-
-    The reward ramps up linearly from 0 at progress_threshold to full strength at progress=1.0.
-    This provides consistent learning signal regardless of tracking accuracy.
-
-    Timeline:
-        Progress:  0.0 -------- 0.8 -------- 1.0
-        Gate:       0           0    ramp    1.0
-                              (start)      (full)
-
-    Args:
-        env: The environment.
-        command_name: Name of the tracking command term.
-        progress_threshold: Trajectory progress above which to start rewarding staticness.
-            Default 0.8 = last 20% of trajectory.
-        joint_vel_std: Standard deviation for exponential kernel on joint velocity norm.
-        root_vel_std: Standard deviation for exponential kernel on root velocity norm.
-        asset_cfg: Asset configuration (can specify joint_names to check specific joints).
-
-    Returns:
-        Reward tensor: product of exp kernels for joint vel and root vel, gated by progress.
-    """
-    command = env.command_manager.get_term(command_name)
-    robot = env.scene[asset_cfg.name]
-
-    # Compute trajectory progress [0, 1]
-    progress = command.timestep_counter.float() / max(command.num_timesteps - 1, 1)
-    progress = torch.clamp(progress, 0.0, 1.0)
-
-    # Compute progress-based gate: ramps from 0 at threshold to 1 at progress=1.0
-    # This ensures the reward gradually increases toward the end
-    gate = (progress - progress_threshold) / (1.0 - progress_threshold)
-    gate = torch.clamp(gate, 0.0, 1.0)
-
-    # Get joint velocities
-    if asset_cfg.joint_ids is not None and len(asset_cfg.joint_ids) > 0:
-        joint_vel = robot.data.joint_vel[:, asset_cfg.joint_ids]
-    else:
-        joint_vel = robot.data.joint_vel
-
-    joint_vel_norm_sq = torch.mean(torch.square(joint_vel), dim=-1)
-
-    # Get root velocity (linear xy + angular z)
-    root_lin_vel_xy = robot.data.root_lin_vel_b[:, :2]  # [num_envs, 2]
-    root_ang_vel_z = robot.data.root_ang_vel_b[:, 2:3]  # [num_envs, 1]
-    root_vel = torch.cat([root_lin_vel_xy, root_ang_vel_z], dim=-1)  # [num_envs, 3]
-    root_vel_norm_sq = torch.mean(torch.square(root_vel), dim=-1)
-
-    # Exponential reward: smaller velocity -> higher reward
-    joint_static_reward = torch.exp(-joint_vel_norm_sq / (joint_vel_std**2))
-    root_static_reward = torch.exp(-root_vel_norm_sq / (root_vel_std**2))
-
-    # Product of both rewards (both need to be static for high reward)
-    static_reward = joint_static_reward * root_static_reward
-
-    # Apply progress-based gate
-    return static_reward * gate
 
 def nominal_posture_at_end_exp(
     env: ManagerBasedRLEnv,
@@ -180,12 +73,14 @@ def nominal_posture_at_end_exp(
     # Apply progress-based gate
     return posture_reward * gate
 
+
 # Note: The command gets updated after the reward is computed resulting in a one-step reward delay.
 def track_base_height_exp_smooth(env: ManagerBasedRLEnv, command_name: str, std: float) -> torch.Tensor:
     """Reward the agent for tracking the base height."""
     command_term: UniformVelocityBaseHeightCommand = env.command_manager.get_term(command_name)
     base_height_error = torch.square(command_term.base_height - command_term.target_height)
     return torch.exp(-base_height_error / std**2)
+
 
 def track_lin_vel_xy_yaw_frame_exp_weighted_simplified(
     env: ManagerBasedRLEnv,
@@ -228,6 +123,7 @@ def track_lin_vel_xy_yaw_frame_exp_weighted_simplified(
 
     # Return weighted exponential reward
     return weight * torch.exp(-lin_vel_error / std**2)
+
 
 def track_ang_vel_z_world_exp_weighted_simplified(
     env: ManagerBasedRLEnv,
@@ -275,6 +171,7 @@ def track_ang_vel_z_world_exp_weighted_simplified(
     # Return weighted exponential reward
     return weight * torch.exp(-ang_vel_error / std**2)
 
+
 def track_lin_vel_xy_yaw_frame_exp_weighted(
     env: ManagerBasedRLEnv,
     command_name: str,
@@ -317,6 +214,7 @@ def track_lin_vel_xy_yaw_frame_exp_weighted(
     # Return weighted exponential reward
     return weight * torch.exp(-lin_vel_error / std**2)
 
+
 def track_lin_vel_xy_yaw_frame_exp_aligned(
     env: ManagerBasedRLEnv, std: float, command_name: str, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")
 ) -> torch.Tensor:
@@ -342,6 +240,7 @@ def track_lin_vel_xy_yaw_frame_exp_aligned(
 
     return reward
 
+
 def vel_xy_in_threshold(
     env: ManagerBasedRLEnv, command_name: str, threshold: float, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")
 ) -> torch.Tensor:
@@ -352,6 +251,7 @@ def vel_xy_in_threshold(
 
     lin_vel_error = torch.linalg.vector_norm(vel_cmd - vel_yaw, dim=1)
     return (lin_vel_error < threshold).float()
+
 
 def track_base_height(
     env: ManagerBasedRLEnv,
@@ -389,6 +289,7 @@ def track_base_height(
 
     return reward
 
+
 def base_height_exp(
     env: ManagerBasedRLEnv,
     target_height: float,
@@ -414,11 +315,13 @@ def base_height_exp(
     height_error = torch.square(asset.data.root_pos_w[:, 2] - adjusted_target_height)
     return torch.exp(-height_error / std**2)
 
+
 def base_height_in_threshold(env: ManagerBasedRLEnv, command_name: str, threshold: float) -> torch.Tensor:
     """Reward the agent for tracking the base height."""
     command_term: UniformVelocityBaseHeightCommand = env.command_manager.get_term(command_name)
     base_height_error = torch.abs(command_term.base_height - command_term.target_height)
     return (base_height_error < threshold).float()
+
 
 def stand_still(
     env: ManagerBasedRLEnv,
@@ -465,4 +368,3 @@ def stand_still(
     reward = feet_without_contact * is_null_cmd.float()
 
     return reward
-
