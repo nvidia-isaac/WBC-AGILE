@@ -146,7 +146,7 @@ Motion tracking tasks for learning pick-and-place manipulation behaviors. The ro
 | Task ID | Controlled Joints | Policy Type | Commands | Observations | Actuator Model |
 |---------|-------------------|-------------|----------|--------------|----------------|
 | `G1-PickPlace-Tracking-v0` | Right arm + hand + waist (16 joints) | Teacher (Non-Privileged) | Trajectory tracking | Current state | Implicit Actuator |
-| `G1-PickPlace-Tracking-v0-Play` | Right arm + hand + waist (16 joints) | Evaluation | Trajectory tracking | Current state | Implicit Actuator |
+| `G1-PickPlace-Tracking-v0-Debug` | Right arm + hand + waist (16 joints) | Evaluation | Trajectory tracking | Current state | Implicit Actuator (GUI-tunable PD gains) |
 
 **Key Features:**
 - **Modular Policy Architecture**: Upper body (manipulation) and lower body (locomotion) are controlled by separate policies
@@ -166,7 +166,7 @@ To run:
 python scripts/train.py --task G1-PickPlace-Tracking-v0
 
 # Play trained policy
-python scripts/play.py --task G1-PickPlace-Tracking-v0-Play
+python scripts/eval.py --task G1-PickPlace-Tracking-v0 --checkpoint path/to/checkpoint
 ```
 
 ---

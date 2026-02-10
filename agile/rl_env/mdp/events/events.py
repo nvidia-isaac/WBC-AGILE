@@ -235,7 +235,6 @@ def reset_robot_to_trajectory(
         env_ids: The environment indices to reset.
         trajectory_time_idx: Range ``(start_idx, end_idx)`` of valid timesteps to sample from.
         command_name: The name of the trajectory command term.
-        joint_pos_noise: Uniform noise magnitude for tracked joint positions. Defaults to 0.0.
         asset_cfg: The robot asset configuration. Defaults to ``SceneEntityCfg("robot")``.
     """
     command = env.command_manager.get_term(command_name)
@@ -260,7 +259,7 @@ def reset_robot_to_trajectory(
     ].float()
 
     # Reset the robot based on the command
-    positions = command.pos_command_e[env_ids] + command._env.scene.env_origins[env_ids]
+    positions = command.pos_command_e[env_ids] + env.scene.env_origins[env_ids]
     orientations = command.quat_command_e[env_ids]
 
     robot.write_root_pose_to_sim(torch.cat([positions, orientations], dim=-1), env_ids=env_ids)

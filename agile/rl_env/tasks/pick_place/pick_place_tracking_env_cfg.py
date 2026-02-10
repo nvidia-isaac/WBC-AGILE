@@ -464,7 +464,7 @@ class TerminationsCfg:
     robot_fall = DoneTerm(
         func=mdp.out_of_bound,
         params={
-            "asset_cfg": SceneEntityCfg("object"),
+            "asset_cfg": SceneEntityCfg("robot"),
             "in_bound_range": {"z": [0.5, 1.5]},
         },
     )

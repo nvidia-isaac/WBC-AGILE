@@ -122,7 +122,7 @@ class G1PickPlaceTrackingEnvCfgDebug(G1PickPlaceTrackingEnvCfg):
         self.rewards.dof_vel_l2 = None  # type: ignore[assignment]
         self.rewards.joint_pos_limit = None  # type: ignore[assignment]
         self.rewards.object_pos_tracking = None  # type: ignore[assignment]
-        # Only keep: reaching_object
+        # Only keep: termination_penalty, lifting_object, hand_object_tracking, etc.
 
         # Disable terminations that reference tracking_command
         self.terminations.bad_base_pose = None  # type: ignore[assignment]

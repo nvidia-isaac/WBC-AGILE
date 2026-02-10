@@ -105,7 +105,7 @@ class DeltaJointPositionAction(JointAction):
         """The previous targets of the joints."""
         return self._prev_targets
 
-    def process_actions(self, actions: torch.Tensor) -> torch.Tensor:
+    def process_actions(self, actions: torch.Tensor) -> None:
         # store the raw actions
         self._raw_actions[:] = actions
         # apply the affine transformations

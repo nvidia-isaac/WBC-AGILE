@@ -49,7 +49,8 @@ def motion_object_position_error_exp(env: ManagerBasedEnv, command_name: str, st
         Reward tensor of shape (num_envs,).
     """
     command: TrackingCommand = env.command_manager.get_term(command_name)
-    assert command.object is not None, "Object tracking requires object_name to be set in TrackingCommandCfg"
+    if command.object is None:
+        raise ValueError("Object tracking requires object_name to be set in TrackingCommandCfg")
     error = torch.sum(torch.square(command.command_object_pos_w - command.object_pos_w), dim=-1)
     return torch.exp(-error / std**2)
 
@@ -66,7 +67,8 @@ def motion_object_orientation_error_exp(env: ManagerBasedEnv, command_name: str,
         Reward tensor of shape (num_envs,).
     """
     command: TrackingCommand = env.command_manager.get_term(command_name)
-    assert command.object is not None, "Object tracking requires object_name to be set in TrackingCommandCfg"
+    if command.object is None:
+        raise ValueError("Object tracking requires object_name to be set in TrackingCommandCfg")
     error = quat_error_magnitude(command.command_object_quat_w, command.object_quat_w) ** 2
     return torch.exp(-error / std**2)
 

@@ -170,7 +170,7 @@ def bad_joint_pos(
 def out_of_bound(
     env: ManagerBasedRLEnv,
     asset_cfg: SceneEntityCfg = SceneEntityCfg("object"),
-    in_bound_range: dict[str, tuple[float, float]] = {},  # noqa: B006
+    in_bound_range: dict[str, tuple[float, float]] | None = None,
     reference_asset_cfg: SceneEntityCfg | None = None,
 ) -> torch.Tensor:
     """Termination condition for the object falls out of bound.
@@ -186,6 +186,8 @@ def out_of_bound(
         ValueError: If reference_asset_cfg is provided but body_names is not specified or resolves to multiple bodies.
     """
     object: RigidObject = env.scene[asset_cfg.name]
+    if in_bound_range is None:
+        in_bound_range = {}
     # Default to (-inf, inf) for unspecified dimensions - always in bounds
     range_list = [in_bound_range.get(key, (float("-inf"), float("inf"))) for key in ["x", "y", "z"]]
     ranges = torch.tensor(range_list, device=env.device)

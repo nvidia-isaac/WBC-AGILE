@@ -72,7 +72,8 @@ class TrackingCommand(CommandTerm):
             self.object = None
 
         # Load motion data from YAML
-        assert os.path.exists(cfg.file_path), f"Motion file not found: {cfg.file_path}"
+        if not os.path.exists(cfg.file_path):
+            raise FileNotFoundError(f"Motion file not found: {cfg.file_path}")
         with open(cfg.file_path) as f:
             motion_data = yaml.safe_load(f)
         qpos_data = torch.tensor(motion_data["qpos"], device=self.device)
@@ -243,8 +244,8 @@ class TrackingCommand(CommandTerm):
         """Update the command."""
         if self.cfg.update_goal_on_reach:
             pos_error = torch.norm(self.robot.data.root_pos_w - self.command_anchor_pos_w, dim=1)
-            if pos_error < self.cfg.goal_reach_threshold:
-                self.timestep_counter += 1
+            reached = pos_error < self.cfg.goal_reach_threshold
+            self.timestep_counter[reached] += 1
         else:
             self.timestep_counter += 1
 

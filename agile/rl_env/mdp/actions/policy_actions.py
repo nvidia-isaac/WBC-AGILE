@@ -15,6 +15,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from typing import TYPE_CHECKING
 
@@ -24,6 +25,8 @@ import isaaclab.utils.string as string_utils
 from isaaclab.assets.articulation import Articulation
 from isaaclab.managers.action_manager import ActionTerm, ActionTermCfg
 from isaaclab.utils.assets import retrieve_file_path
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedEnv
@@ -37,11 +40,11 @@ def load_torchscript_model(model_path: str, device: torch.device) -> torch.jit.S
     try:
         model = torch.jit.load(model_path, map_location=device)
         model.eval()
-        print(f"Successfully loaded TorchScript model from {model_path}")
+        logger.info("Successfully loaded TorchScript model from %s", model_path)
         return model
     except Exception as e:
-        print(f"Error loading TorchScript model: {e}")
-        raise e
+        logger.error("Error loading TorchScript model: %s", e)
+        raise
 
 
 class AgileBasedLowerBodyAction(ActionTerm):
@@ -69,7 +72,8 @@ class AgileBasedLowerBodyAction(ActionTerm):
         self._env = env
 
         # Find joint ids for the lower body joints
-        assert len(cfg.joint_names) > 0, "Joint names must be provided."
+        if len(cfg.joint_names) == 0:
+            raise ValueError("Joint names must be provided.")
         self._joint_ids, self._joint_names = self._asset.find_joints(self.cfg.joint_names)
 
         # Get the scale and offset from the configuration
