@@ -15,8 +15,11 @@
 
 import math
 
-from isaaclab.sensors import ContactSensorCfg
+import isaaclab.sim as sim_utils
+from isaaclab.assets import AssetBaseCfg
+from isaaclab.sensors import CameraCfg, ContactSensorCfg, TiledCameraCfg
 from isaaclab.utils import configclass
+from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR
 
 from agile.rl_env.assets import ASSET_DIR
 from agile.rl_env.assets.robots.unitree_g1 import (
@@ -28,7 +31,8 @@ from agile.rl_env.assets.robots.unitree_g1 import (
 )
 from agile.rl_env.mdp.actions import JointPositionGUIActionCfg, ObjectPoseGUIActionCfg
 from agile.rl_env.mdp.rewards import RewardVisualizerCfg
-from agile.rl_env.tasks.pick_place.pick_place_tracking_env_cfg import PickPlaceTrackingEnvCfg
+from agile.rl_env.tasks.pick_place.pick_place_domain_randomization import RecordRandomizationEventCfg
+from agile.rl_env.tasks.pick_place.pick_place_tracking_env_cfg import ObservationsCfg, PickPlaceTrackingEnvCfg
 
 
 @configclass
@@ -76,6 +80,112 @@ class G1PickPlaceTrackingEnvCfg(PickPlaceTrackingEnvCfg):
         # rewards
         if hasattr(self.rewards, "lifting_object"):
             self.rewards.lifting_object.params["minimal_height"] = self.scene.object.init_state.pos[2]
+
+
+@configclass
+class G1PickPlaceTrackingEnvCfgRecord(G1PickPlaceTrackingEnvCfg):
+    """Configuration for the G1 V2P environment with a camera and visual randomization."""
+
+    def __post_init__(self) -> None:
+        """Post initialization."""
+        super().__post_init__()
+        # Scene configuration overrides
+        self.scene.num_envs = 4
+        # Disable physics replication for visual texture randomization
+        self.scene.replicate_physics = False
+        self.scene.camera = TiledCameraCfg(
+            prim_path="{ENV_REGEX_NS}/Robot/torso_link/front_cam",
+            update_period=0.0,
+            height=480,
+            width=640,
+            data_types=["rgb"],
+            # Default pinhole camera configuration for OAK-D camera.
+            spawn=sim_utils.PinholeCameraCfg.from_intrinsic_matrix(
+                intrinsic_matrix=[
+                    375.1500244140625,
+                    0.0,
+                    317.8176574707031,
+                    0.0,
+                    374.9283142089844,
+                    248.43441772460938,
+                    0.0,
+                    0.0,
+                    1.0,
+                ],
+                width=640,
+                height=480,
+                focal_length=24,
+                focus_distance=400.0,
+                clipping_range=(0.1, 20.0),
+            ),
+            offset=CameraCfg.OffsetCfg(pos=(0.1, 0.0, 0.45), rot=(-0.29, 0.64, -0.64, 0.29), convention="ros"),
+        )
+
+        # Add dome light for visual randomization
+        self.scene.light = AssetBaseCfg(
+            prim_path="/World/DomeLight",
+            spawn=sim_utils.DomeLightCfg(
+                color=(0.75, 0.75, 0.75),
+                intensity=3000.0,
+                texture_file="omniverse://isaac-dev.ov.nvidia.com/NVIDIA/Assets/Skies/Clear/noon_grass_4k.hdr",
+            ),
+        )
+
+        # Set the object to be the can only
+        self.scene.object.spawn.usd_path = [
+            f"{ISAAC_NUCLEUS_DIR}/Props/YCB/Axis_Aligned_Physics/005_tomato_soup_can.usd"
+        ]
+
+        # Add observations for recording
+        self.observations.record = ObservationsCfg.RecordObservationsCfg()
+
+        # Disable debug visualization of end-effector frame and tracking command
+        self.scene.ee_frame.debug_vis = False
+        self.commands.tracking_command.debug_vis = False
+
+        # Use events with visual randomization (dome light + table material)
+        self.events = RecordRandomizationEventCfg()
+        self.events.reset_robot.params["trajectory_time_idx"] = (0, 5)
+
+
+@configclass
+class G1PickPlaceTrackingEnvCfgGr00tInference(G1PickPlaceTrackingEnvCfgRecord):
+    """Configuration for the G1 V2P environment for GR00T inference."""
+
+    def __post_init__(self) -> None:
+        """Post initialization."""
+        super().__post_init__()
+        # Add background for GR00T inference
+        self.scene.background = AssetBaseCfg(
+            prim_path="{ENV_REGEX_NS}/Background",
+            init_state=AssetBaseCfg.InitialStateCfg(
+                pos=(0, 0, 0.01),  # Adjusted to avoid height competition issues.
+                rot=(1.0, 0.0, 0.0, 0.0),
+            ),
+            spawn=sim_utils.UsdFileCfg(
+                usd_path="https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Environments/Simple_Warehouse/warehouse.usd",
+                scale=(1.0, 1.0, 1.0),
+                rigid_props=sim_utils.RigidBodyPropertiesCfg(
+                    disable_gravity=None,
+                    solver_position_iteration_count=4,
+                    solver_velocity_iteration_count=1,
+                ),
+            ),
+        )
+        # Set scene spacing for GR00T inference
+        self.scene.env_spacing = 50
+
+        # Disable termination terms that reference tracking_command
+        self.terminations.bad_joint_pos = None
+        self.terminations.bad_base_pose.params["base_pos_threshold"] = 0.5
+        self.terminations.bad_base_rotation.params["base_ori_threshold"] = 0.5
+        self.terminations.object_out_of_bound.params["in_bound_range"] = {"z": [0.3, 1.2]}
+
+        # Disable domain randomization events
+        self.events.randomize_light = None
+        self.events.rand_ground_texture = None
+        self.events.randomize_light_startup = None
+        self.events.rand_ground_texture_startup = None
 
 
 @configclass
