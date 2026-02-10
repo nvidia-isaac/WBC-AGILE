@@ -250,7 +250,7 @@ class CommandsCfg:
     base_velocity = mdp.UniformVelocityBaseHeightCommandCfg(
         asset_name="robot",
         resampling_time_range=(7.5, 10.0),
-        rel_standing_envs=0.20,
+        rel_standing_envs=0.10,
         heading_command=False,
         debug_vis=True,
         default_height=unitree_g1.DEFAULT_PELVIS_HEIGHT,
