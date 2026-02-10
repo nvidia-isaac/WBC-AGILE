@@ -112,10 +112,7 @@ class body_acc_l2(ManagerTermBase):
 root_acc_l2 = body_acc_l2
 
 
-def body_ang_vel_l2(
-    env: ManagerBasedRLEnv,
-    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
-) -> torch.Tensor:
+class body_ang_vel_l2(ManagerTermBase):
     """Penalize body angular velocity using L2 norm.
 
     This reward penalizes high angular velocities of a specified body/link,
@@ -132,28 +129,45 @@ def body_ang_vel_l2(
             weight=-0.01,
             params={"asset_cfg": SceneEntityCfg("robot", body_names=["torso_link"])},
         )
-
-    Args:
-        env: The environment.
-        asset_cfg: Asset configuration. Use body_names to specify a link, otherwise uses root.
-
-    Returns:
-        L2 norm of the body's angular velocity (sum of squared components).
     """
-    # Extract the robot asset
-    robot: Articulation = env.scene[asset_cfg.name]
 
-    # Get angular velocity based on whether body_names is specified
-    if asset_cfg.body_ids is not None and len(asset_cfg.body_ids) > 0:
-        # Use specified body angular velocity
-        body_idx = asset_cfg.body_ids[0]
-        ang_vel = robot.data.body_ang_vel_w[:, body_idx, :]  # [num_envs, 3]
-    else:
-        # Default to root angular velocity
-        ang_vel = robot.data.root_ang_vel_w  # [num_envs, 3]
+    def __init__(self, cfg: RewardTermCfg, env: ManagerBasedRLEnv):
+        super().__init__(cfg, env)
 
-    # Compute L2 penalty (sum of squared angular velocities)
-    return torch.sum(torch.square(ang_vel), dim=-1)
+        # Resolve body index if body_names is provided
+        self._body_idx: int | None = None
+        asset_cfg: SceneEntityCfg = cfg.params.get("asset_cfg", SceneEntityCfg("robot"))
+        if asset_cfg.body_names is not None:
+            asset: Articulation = env.scene[asset_cfg.name]
+            self._body_idx = asset.find_bodies(asset_cfg.body_names)[0][0]
+
+    def __call__(
+        self,
+        env: ManagerBasedRLEnv,
+        asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+    ) -> torch.Tensor:
+        """Compute body angular velocity L2 penalty.
+
+        Args:
+            env: The environment.
+            asset_cfg: Asset configuration. Use body_names to specify a link, otherwise uses root.
+
+        Returns:
+            L2 norm of the body's angular velocity (sum of squared components).
+        """
+        # Extract the robot asset
+        robot: Articulation = env.scene[asset_cfg.name]
+
+        # Get angular velocity based on whether body_names is specified
+        if self._body_idx is not None:
+            # Use specified body angular velocity
+            ang_vel = robot.data.body_ang_vel_w[:, self._body_idx, :]  # [num_envs, 3]
+        else:
+            # Default to root angular velocity
+            ang_vel = robot.data.root_ang_vel_w  # [num_envs, 3]
+
+        # Compute L2 penalty (sum of squared angular velocities)
+        return torch.sum(torch.square(ang_vel), dim=-1)
 
 
 def if_standing(
@@ -411,7 +425,7 @@ def feet_distance_from_ref(
     if norm == "l1":
         return torch.abs(distance_error)
     elif norm == "l2":
-        return torch.norm(distance_error, p=2)
+        return torch.square(distance_error)
     else:
         raise ValueError(f"Invalid norm: {norm}. Must be 'l1' or 'l2'.")
 

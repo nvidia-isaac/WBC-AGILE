@@ -65,10 +65,6 @@ class T1StandUpPpoRunnerCfg(RslRlOnPolicyRunnerCfg):
             use_mirror_loss=False,
             data_augmentation_func=lr_mirror_T1,
         ),
-        l2c2_cfg=RslRlL2C2Cfg(
-            lambda_actor=1.0,
-            lambda_critic=0.1,
-        ),
         reward_normalization_cfg=RslRlRewardNormalizationCfg(
             decay=0.999,  # ~693 steps half-life
             epsilon=1e-2,

@@ -17,6 +17,7 @@
 
 from __future__ import annotations
 
+import logging
 import math
 import os
 from dataclasses import dataclass, field
@@ -28,6 +29,8 @@ import isaaclab.utils.math as math_utils
 from isaaclab.assets import Articulation
 from isaaclab.terrains import TerrainImporter
 from isaaclab.utils import configclass
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedRLEnv
@@ -62,7 +65,7 @@ class FallenState:
     root_pos_rel: torch.Tensor  # (3,) position relative to terrain origin
     root_quat: torch.Tensor  # (4,) quaternion orientation
     root_lin_vel: torch.Tensor  # (3,) linear velocity
-    root_ang_vel: torch.Tensor  # (6,) angular velocity
+    root_ang_vel: torch.Tensor  # (3,) angular velocity
 
     # Joint state
     joint_pos: torch.Tensor  # (num_joints,)
@@ -135,13 +138,13 @@ class FallenStateDataset:
         total_states = states_per_level * self._num_terrain_levels
 
         if verbose:
-            print("[FallenStateDataset] Starting collection:")
-            print(f"  - Terrain grid: {self._num_terrain_levels} levels x {num_terrain_types} types")
-            print(f"  - Num envs: {env.num_envs}")
-            print(f"  - Spawns per level: {self.cfg.num_spawns_per_level}")
-            print(f"  - States per level: {states_per_level}")
-            print(f"  - Total states: {total_states}")
-            print(f"  - Fall duration: {self.cfg.fall_duration_s}s ({fall_steps} steps)")
+            logger.info("[FallenStateDataset] Starting collection:")
+            logger.info(f"  - Terrain grid: {self._num_terrain_levels} levels x {num_terrain_types} types")
+            logger.info(f"  - Num envs: {env.num_envs}")
+            logger.info(f"  - Spawns per level: {self.cfg.num_spawns_per_level}")
+            logger.info(f"  - States per level: {states_per_level}")
+            logger.info(f"  - Total states: {total_states}")
+            logger.info(f"  - Fall duration: {self.cfg.fall_duration_s}s ({fall_steps} steps)")
 
         # Initialize storage for all terrain levels
         for level in range(self._num_terrain_levels):
@@ -156,12 +159,18 @@ class FallenStateDataset:
             }
 
         # Disable terminations during collection to allow full falls without interruption
+        # Requires the monkey patch in manager_based_rl_env_patch.py to be active
+        if not hasattr(env, "_disable_terminations") and not hasattr(type(env), "_disable_terminations"):
+            raise RuntimeError(
+                "Fallen state collection requires the '_disable_terminations' monkey patch. "
+                "Ensure manager_based_rl_env_patch.py is applied before collecting fallen states."
+            )
         env._disable_terminations = True
         try:
             # Collect states for each terrain level
             for level in range(self._num_terrain_levels):
                 if verbose:
-                    print(f"  Collecting level {level + 1}/{self._num_terrain_levels}...", end=" ", flush=True)
+                    logger.info(f"  Collecting level {level + 1}/{self._num_terrain_levels}...")
 
                 for _spawn_idx in range(self.cfg.num_spawns_per_level):
                     # Reset envs distributed across terrain columns
@@ -180,11 +189,11 @@ class FallenStateDataset:
 
                 if verbose:
                     actual = self.get_num_states(level)
-                    print(f"done ({actual} states)")
+                    logger.info(f"  Level {level + 1} done ({actual} states)")
 
             if verbose:
                 total_states = sum(self.get_num_states(lvl) for lvl in range(self._num_terrain_levels))
-                print(f"[FallenStateDataset] Collection complete: {total_states} total states")
+                logger.info(f"[FallenStateDataset] Collection complete: {total_states} total states")
         finally:
             # Re-enable terminations for normal training
             env._disable_terminations = False
@@ -382,6 +391,6 @@ class FallenStateDataset:
             self._terrain_cell_size = save_dict.get("terrain_cell_size", (8.0, 8.0))
             self._states_by_level = save_dict["states_by_level"]
             return True
-        except Exception as e:
-            print(f"[FallenStateDataset] Failed to load from {path}: {e}")
+        except Exception:
+            logger.exception(f"[FallenStateDataset] Failed to load from {path}")
             return False

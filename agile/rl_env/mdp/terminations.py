@@ -218,7 +218,8 @@ def link_distance(
     robot, _ = get_robot_cfg(env, asset_cfg)
     link_pos = robot.data.body_pos_w[:, asset_cfg.body_ids]
 
-    assert len(asset_cfg.body_ids) == 2, "Link distance is only supported for 2 links"
+    if len(asset_cfg.body_ids) != 2:
+        raise ValueError("Link distance is only supported for 2 links")
     link_distance = torch.norm(link_pos[:, 0] - link_pos[:, 1], dim=1)
 
     # Check minimum distance

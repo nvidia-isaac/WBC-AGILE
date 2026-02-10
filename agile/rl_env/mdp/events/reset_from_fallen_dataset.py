@@ -152,7 +152,8 @@ class reset_from_fallen_dataset(ManagerTermBase):
         terrain: TerrainImporter,
     ) -> None:
         """Reset environments to sampled fallen states from dataset."""
-        assert self._dataset is not None  # Guaranteed by has_dataset check in __call__
+        if self._dataset is None:
+            raise RuntimeError("Dataset not set. Call set_dataset() before _reset_from_dataset().")
 
         # Get terrain levels for each env
         terrain_levels = terrain.terrain_levels[env_ids]

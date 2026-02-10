@@ -17,6 +17,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING
 
 from agile.rl_env.mdp.events import (
@@ -26,6 +27,8 @@ from agile.rl_env.mdp.events import (
     get_fallen_state_cache_path,
     reset_from_fallen_dataset,
 )
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedRLEnv
@@ -59,21 +62,21 @@ def pre_learn(env: ManagerBasedRLEnv, task_name: str, agent_cfg) -> None:
         cache_path = _get_cache_path(env, task_name, dataset_cfg)
 
         if dataset.load(cache_path):
-            print(f"[INFO] Loaded fallen state dataset from cache: {cache_path}")
+            logger.info(f"Loaded fallen state dataset from cache: {cache_path}")
             reset_event.set_dataset(dataset)
             return
 
-        print(f"[INFO] No valid cache found at {cache_path}, will collect new dataset.")
+        logger.info(f"No valid cache found at {cache_path}, will collect new dataset.")
 
     # Collect new dataset
-    print("[INFO] Starting fallen state collection...")
+    logger.info("Starting fallen state collection...")
     dataset.collect(env, verbose=True)
 
     # Save to cache
     if dataset_cfg.cache_enabled:
         cache_path = _get_cache_path(env, task_name, dataset_cfg)
         dataset.save(cache_path)
-        print(f"[INFO] Saved fallen state dataset to cache: {cache_path}")
+        logger.info(f"Saved fallen state dataset to cache: {cache_path}")
 
     # Inject dataset into reset event
     reset_event.set_dataset(dataset)
