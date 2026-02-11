@@ -67,6 +67,12 @@ class PickPlaceTrackingSceneCfg(InteractiveSceneCfg):
     # robots
     robot: ArticulationCfg = MISSING
 
+    # camera
+    camera = None
+
+    # background
+    background = None
+
     # fix object
     fixture_structure = AssetBaseCfg(
         prim_path="/World/envs/env_.*/fixture_structure",
@@ -282,9 +288,44 @@ class ObservationsCfg:
             self.enable_corruption = False
             self.concatenate_terms = True
 
+    @configclass
+    class RecordObservationsCfg(ObsGroup):
+        """Observation specifications for the camera."""
+
+        image = ObsTerm(
+            func=mdp.image, params={"sensor_cfg": SceneEntityCfg("camera"), "data_type": "rgb", "normalize": False}
+        )
+        base_lin_vel = ObsTerm(func=mdp.base_lin_vel)
+        base_ang_vel = ObsTerm(func=mdp.base_ang_vel)
+        joint_pos = ObsTerm(
+            func=mdp.joint_pos_rel,
+            params={
+                "asset_cfg": SceneEntityCfg(
+                    "robot",
+                    joint_names=RIGHT_HAND_ARM_JOINT_NAMES + WAIST_JOINT_NAMES,
+                ),
+            },
+        )
+        joint_vel = ObsTerm(
+            func=mdp.joint_vel_rel,
+            scale=0.1,
+            params={
+                "asset_cfg": SceneEntityCfg(
+                    "robot",
+                    joint_names=LEG_JOINT_NAMES + WAIST_JOINT_NAMES,
+                ),
+            },
+        )
+
+        def __post_init__(self) -> None:
+            """Post initialization."""
+            self.enable_corruption = False
+            self.concatenate_terms = False
+
     # observation groups
     policy: PolicyCfg = PolicyCfg()
     agile_policy: AgileTeacherPolicyObservationsCfg = AgileTeacherPolicyObservationsCfg()
+    record: RecordObservationsCfg = None
 
 
 @configclass

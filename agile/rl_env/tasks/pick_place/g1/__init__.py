@@ -40,3 +40,23 @@ gym.register(
         "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_rl_ppo_cfg:G1PickPlacePPORunnerCfg",
     },
 )
+
+gym.register(
+    id="G1-PickPlace-Tracking-v0-Record",
+    entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": f"{__name__}.g1_pick_place_tracking_env_cfg:G1PickPlaceTrackingEnvCfgRecord",
+        "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_rl_ppo_cfg:G1PickPlacePPORunnerCfg",
+    },
+)
+
+gym.register(
+    id="G1-PickPlace-Tracking-v0-GR00T-Inference",
+    entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": f"{__name__}.g1_pick_place_tracking_env_cfg:G1PickPlaceTrackingEnvCfgGr00tInference",
+        "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_rl_ppo_cfg:G1PickPlacePPORunnerCfg",
+    },
+)

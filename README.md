@@ -80,6 +80,7 @@ agile/                       # Repository root
 │   │   ├── install_deps_local.sh     # Install for local development
 │   │   └── setup_hooks.sh            # Set up git hooks
 │   ├── wandb_sweep/         # Hyperparameter optimization with W&B
+|   |── data_recording/      # Data recorder and converter for GR00T model post-training
 ├── tests/                   # Test suite
 ├── workflows/               # Support workflow such as docker file
 ├── pyproject.toml           # Project configuration
@@ -234,6 +235,8 @@ This project supports multiple tasks across different robot embodiments (G1 and 
 - **Locomotion**: Velocity tracking for G1 (legs + waist) and T1 (legs only)
 - **Locomotion + Height**: Extended tracking with height commands, includes teacher and student distillation variants (recurrent & history-based)
 - **Stand Up**: Full-body autonomous recovery from arbitrary fallen poses
+- **G1-PickPlace-Tracking**: Whole-body loco-manipulation for G1 with end-effector trajectory tracking during pick-and-place tasks
+- **G1-PickPlace-Tracking-v0-Recording**: Data collection variant with egocentric camera (torso-mounted) and visual domain randomization for training vision-based imitation learning models like GR00T
 
 > 📖 **For detailed task specifications, MDP configurations, complete design philosophy, and training pipeline documentation, see the [Task README](agile/rl_env/tasks/README.md).**
 >
