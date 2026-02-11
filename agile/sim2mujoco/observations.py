@@ -17,7 +17,7 @@
 
 import torch
 
-from agile.sim2mujoco.utils import quat_apply_inverse
+from agile.sim2mujoco.utils import quat_rotate_inverse
 
 
 class HistoryBuffer:
@@ -332,7 +332,7 @@ class ObservationProcessor:
         """Compute gravity vector in robot frame."""
         gravity_world = torch.tensor([0.0, 0.0, -1.0], device=self.device, dtype=torch.float32)
         # Rotate by inverse of root quaternion.
-        gravity_robot = quat_apply_inverse(sim_state.root_quat.float(), gravity_world)
+        gravity_robot = quat_rotate_inverse(sim_state.root_quat.float(), gravity_world)
         return gravity_robot
 
     def _compute_base_ang_vel(self, sim_state) -> torch.Tensor:
