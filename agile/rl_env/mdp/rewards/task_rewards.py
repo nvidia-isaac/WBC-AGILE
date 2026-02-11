@@ -73,6 +73,7 @@ def nominal_posture_at_end_exp(
     # Apply progress-based gate
     return posture_reward * gate
 
+
 def static_at_goal_exp(
     env: ManagerBasedRLEnv,
     command_name: str,

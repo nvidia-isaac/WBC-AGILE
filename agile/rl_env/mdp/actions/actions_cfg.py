@@ -41,6 +41,7 @@ from .velocity_profiles import (
 # Joint actions.
 ##
 
+
 @configclass
 class RandomActionCfg(mdp.JointActionCfg):
     """Configuration for the base random action term.
@@ -78,6 +79,7 @@ class RandomActionCfg(mdp.JointActionCfg):
     """Dictionary mapping joint names to custom position limits (lower_limit, upper_limit).
     If provided, overrides the default joint limits from the robot asset. Defaults to None."""
 
+
 @configclass
 class JointPositionGUIActionCfg(mdp.JointActionCfg):
     """Configuration for the joint position action term.
@@ -105,6 +107,7 @@ class JointPositionGUIActionCfg(mdp.JointActionCfg):
 
     robot_type: Literal["t1", "g1"] = "t1"
     """The type of robot to use. Defaults to 't1'."""
+
 
 @configclass
 class HarnessActionCfg(ActionTermCfg):
@@ -137,6 +140,7 @@ class HarnessActionCfg(ActionTermCfg):
     """The target height of the harness action. Defaults to 0.72."""
     command_name: str | None = None
     """Name of the command term for height commands (e.g., 'base_velocity'). If None, uses fixed target_height."""
+
 
 @configclass
 class LiftActionCfg(ActionTermCfg):

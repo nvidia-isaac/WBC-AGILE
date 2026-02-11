@@ -443,9 +443,7 @@ def main():
                             "Action term 'upper_body_joint_pos' not found. "
                             "Ensure the environment config includes this action term."
                         )
-                    actions[:, :-4] = (
-                        actions[:, :-4] - upper_body_term.prev_targets
-                    ) / upper_body_term._scale
+                    actions[:, :-4] = (actions[:, :-4] - upper_body_term.prev_targets) / upper_body_term._scale
                     gr00t_chunk_step += 1
                 else:
                     # Fallback to zero actions if no chunk available

@@ -23,8 +23,6 @@ from typing import TYPE_CHECKING
 
 import torch
 
-from isaaclab.actuators import ImplicitActuator
-from isaaclab.assets import Articulation
 from isaaclab.envs.mdp.actions import RelativeJointPositionAction
 from isaaclab.managers import EventTermCfg, ManagerTermBase, SceneEntityCfg
 from isaaclab.terrains import TerrainImporter
@@ -33,8 +31,8 @@ from agile.rl_env.mdp import HarnessAction, LiftAction
 
 if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedRLEnv
-    from isaaclab.envs.mdp.commands import UniformVelocityCommand
     from isaaclab.sensors import RayCaster
+
 
 class terrain_levels_vel_curriculum(ManagerTermBase):
     """Curriculum based on the distance the robot walked when commanded to move at a desired velocity."""
@@ -99,6 +97,7 @@ class terrain_levels_vel_curriculum(ManagerTermBase):
         terrain.update_env_origins(env_ids, move_up, move_down)
         return torch.mean(terrain.terrain_levels.float())
 
+
 class terrain_levels_successful_termination(ManagerTermBase):
     """Curriculum based on how often the robot terminates due to the specified termination term."""
 
@@ -146,6 +145,7 @@ class terrain_levels_successful_termination(ManagerTermBase):
 
         terrain.update_env_origins(env_ids, move_up, move_down)
         return torch.mean(terrain.terrain_levels.float())
+
 
 class terrain_levels_standing_at_timeout(ManagerTermBase):
     """Curriculum based on whether the robot is standing when the episode times out.
@@ -220,6 +220,7 @@ class terrain_levels_standing_at_timeout(ManagerTermBase):
         terrain.update_env_origins(env_ids, move_up, move_down)
         return torch.mean(terrain.terrain_levels.float())
 
+
 class action_limit_successful_termination(ManagerTermBase):
     """Curriculum based on the ratio of successful terminations."""
 
@@ -285,6 +286,7 @@ class action_limit_successful_termination(ManagerTermBase):
 
         return action_clip_abs.max().item()
 
+
 def remove_harness(
     env: ManagerBasedRLEnv,
     env_ids: Sequence[int],  # noqa: ARG001
@@ -324,6 +326,7 @@ def remove_harness(
         harness_action.scale_forces(scale)
 
         return scale  # type: ignore
+
 
 class adaptive_lift_curriculum(ManagerTermBase):
     """Adaptive curriculum that adjusts lift forces based on whether robots learn to stand up.
@@ -426,6 +429,7 @@ class adaptive_lift_curriculum(ManagerTermBase):
         self._lift_action.scale_forces(self._force_scale)
 
         return self._force_scale
+
 
 class update_event_range_step(ManagerTermBase):
     """Curriculum to update event parameter ranges given the iteration.
