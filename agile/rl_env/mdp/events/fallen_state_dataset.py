@@ -160,11 +160,6 @@ class FallenStateDataset:
 
         # Disable terminations during collection to allow full falls without interruption
         # Requires the monkey patch in manager_based_rl_env_patch.py to be active
-        if not hasattr(env, "_disable_terminations") and not hasattr(type(env), "_disable_terminations"):
-            raise RuntimeError(
-                "Fallen state collection requires the '_disable_terminations' monkey patch. "
-                "Ensure manager_based_rl_env_patch.py is applied before collecting fallen states."
-            )
         env._disable_terminations = True
         try:
             # Collect states for each terrain level
