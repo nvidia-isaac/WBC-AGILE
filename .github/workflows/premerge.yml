@@ -1,0 +1,111 @@
+# Copyright (c) 2025, NVIDIA CORPORATION. All rights reserved.
+#
+# NVIDIA CORPORATION and its licensors retain all intellectual property
+# and proprietary rights in and to this software, related documentation
+# and any modifications thereto. Any use, reproduction, disclosure or
+# distribution of this software and related documentation without an express
+# license agreement from NVIDIA CORPORATION is strictly prohibited.
+name: WBC-AGILE premerge
+on:
+  pull_request:
+    branches: [main]
+# Cancel in-progress runs for the same PR
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+jobs:
+  ## ------------------------------------------
+  ## Linting and formatting (pre-commit)
+  ## ------------------------------------------
+  lint_precommit:
+    name: pre-commit
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      - name: Install pre-commit
+        run: |
+          python -m pip install --upgrade pip
+          pip install pre-commit
+      - name: Cache pre-commit environments
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pre-commit
+          key: pre-commit-${{ hashFiles('.pre-commit-config.yaml') }}
+          restore-keys: |
+            pre-commit-
+      - name: Run pre-commit
+        run: pre-commit run --all-files --show-diff-on-failure
+  ## ------------------------------------------
+  ## DCO sign-off check
+  ## ------------------------------------------
+  dco_check:
+    name: DCO sign-off
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Check DCO sign-off on all PR commits
+        run: |
+          echo "Checking DCO sign-off for commits in this PR..."
+          BASE_SHA=${{ github.event.pull_request.base.sha }}
+          HEAD_SHA=${{ github.event.pull_request.head.sha }}
+          FAILED=0
+          for SHA in $(git rev-list "$BASE_SHA".."$HEAD_SHA"); do
+            MSG=$(git log -1 --format='%B' "$SHA")
+            if ! echo "$MSG" | grep -qiE '^Signed-off-by: .+ <.+>'; then
+              echo "::error::Commit $SHA is missing DCO sign-off (Signed-off-by)."
+              echo "  Subject: $(git log -1 --format='%s' "$SHA")"
+              echo "  Author:  $(git log -1 --format='%an <%ae>' "$SHA")"
+              FAILED=1
+            else
+              echo "OK: $SHA"
+            fi
+          done
+          if [ "$FAILED" -eq 1 ]; then
+            echo ""
+            echo "One or more commits are missing 'Signed-off-by'. Please amend with:"
+            echo "  git commit --amend -s"
+            echo "See CONTRIBUTING.md for details."
+            exit 1
+          fi
+          echo "All commits have DCO sign-off."
+
+## ------------------------------------------
+## Future: Build & Test (GPU required)
+## ------------------------------------------
+# Uncomment and configure when self-hosted GPU runners are available:
+#
+# build_and_test:
+#   name: Build & Test
+#   needs: [lint_precommit]
+#   runs-on: [self-hosted, gpu]
+#   steps:
+#     - name: Checkout Code
+#       uses: actions/checkout@v4
+#       with:
+#         submodules: recursive
+#     - name: Build Docker image
+#       run: docker build -f workflows/Dockerfile -t agile-ci .
+#     - name: Run unit tests
+#       run: |
+#         docker run --rm --gpus all \
+#           -e WANDB_MODE=disabled \
+#           -e CI=true \
+#           agile-ci \
+#           bash -c "./tests/run_unit_tests.sh"
+#     - name: Run E2E tests
+#       run: |
+#         docker run --rm --gpus all \
+#           -e WANDB_MODE=disabled \
+#           -e CI=true \
+#           -e OMNI_HEADLESS=1 \
+#           agile-ci \
+#           bash -c "${ISAACLAB_PATH}/isaaclab.sh -p tests/test_all_tasks_e2e.py"
