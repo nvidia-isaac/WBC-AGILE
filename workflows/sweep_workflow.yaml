@@ -1,0 +1,63 @@
+# SPDX-FileCopyrightText: Copyright (c) 2024 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+version: 2
+workflow:
+  name: '{{workflow_name}}'
+  resources:
+    default:
+      cpu: 16
+      gpu: 1
+      memory: 100Gi
+      storage: 100Gi
+      # Select platform. Make sure the pool defined in the sweep.yaml file has the desired platform
+      platform: ovx-l40
+      # platform: dgx-h100
+  tasks:
+    - name: train
+      image: '{{image}}'
+      command: ["/bin/bash"]
+      args: ["/tmp/entry.sh"]
+      environment:
+        ACCEPT_EULA: Y
+        OMNI_SERVER: '{{omni_server}}'
+        PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION: python
+      credentials:
+        omni-auth:
+          OMNI_PASS: omni_pass
+          OMNI_USER: omni_user
+        wandb:
+          WANDB_API_KEY: wandb_pass
+          WANDB_USERNAME: wandb_user
+      files:
+        - path: /tmp/entry.sh
+          contents: |
+            set -e
+
+            # Launch sweep.
+            CMD="${ISAACLAB_PATH:?}/isaaclab.sh -p scripts/wandb_sweep/run_sweep.py --project_name {{sweep_name}} --agent_count 2"
+
+            echo $CMD
+            eval $CMD
+      outputs:
+        - dataset:
+            name: agile:{{workflow_id}}
+default-values:
+  # image_default is set by run.py when submitting; fallback for manual runs (must match run_config container_registry.image_name)
+  image_default: docker.io/yourorg/agile:latest
+  image: '{{image_default}}'
+  omni_server: omniverse://localhost
+  workflow_name: agile
+  resume: "False"
+  sweep_name: t1_velocity_height

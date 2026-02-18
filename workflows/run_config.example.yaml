@@ -1,0 +1,36 @@
+# Copy this to run_config.yaml and customize for your infrastructure
+# This file serves as a template for external users
+container_registry:
+  # Docker registry URL for your container images
+  # Examples:
+  #   - docker.io/yourorg/agile
+  #   - ghcr.io/yourorg/agile
+  #   - your-registry.com/agile
+  image_name: docker.io/yourorg/agile
+  dockerfile: ./Dockerfile
+osmo_pools:
+  # OSMO pool names for different workflow types
+  # If you don't have separate pools, use the same pool name for all
+  train: your-gpu-pool
+  eval: your-gpu-pool
+  sweep: your-gpu-pool
+omniverse:
+  # Omniverse server URL
+  # For local development without Omniverse, use:
+  #   server_url: omniverse://localhost
+  server_url: omniverse://localhost
+wandb:
+  # Weights & Biases team name for logging
+  team_name: your-team-name
+storage:
+  # OSMO storage URL for workflow artifacts
+  # This is used to download checkpoints from completed workflows
+  osmo_storage_url: https://your-osmo-storage-url/
+  # Local directory where OSMO artifacts will be downloaded
+  download_base_dir: ../logs/osmo
+paths:
+  # Workflow file paths relative to this file's directory (usually don't need to change these)
+  workflows_dir: .
+  train_workflow: ./train_workflow.yaml
+  eval_workflow: ./eval_workflow.yaml
+  sweep_workflow: ./sweep_workflow.yaml

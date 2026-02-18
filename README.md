@@ -106,6 +106,7 @@ agile/                       # Repository root
 - [Development](#development)
   - [Docker Build Process](#docker-build-process)
   - [Pre-commit Hooks](#pre-commit-hooks)
+  - [Remote Training with OSMO](#remote-training-with-osmo)
 - [Deployment](#deployment)
 - [Office Hour and FAQ](#office-hour-and-faq)
 - [Troubleshooting](#troubleshooting)
@@ -429,6 +430,28 @@ The pre-commit configuration includes:
 - Various file checks (trailing whitespace, merge conflicts, etc.)
 
 Note: The `third_party` directory is excluded from all pre-commit hooks to preserve the original code style of external dependencies.
+</details>
+
+<details>
+<summary> Remote Training with OSMO </summary>
+
+### Remote Training with OSMO
+
+The project supports running training, evaluation, and sweep jobs on remote GPU clusters via [OSMO](https://github.com/NVIDIA/OSMO). The `run.py` script handles Docker image building, pushing, and workflow submission:
+
+```bash
+# Train on cluster (builds Docker image on first run)
+./run.py train --name <experiment_name> --task_name <task_name> --rebuild
+
+# Evaluate on cluster
+./run.py eval --name <eval_name> --wandb_run <team>/<project>/<run_id> --task_name <task_name> --rebuild
+
+# Hyperparameter sweep
+./run.py sweep --name <sweep_name> --sweep_name <wandb_sweep> --rebuild
+```
+
+Use `--rebuild` after code changes and `--use-existing` to reuse a previously built image. See [workflows/README.md](workflows/README.md) for setup, configuration, and advanced usage.
+
 </details>
 
 ## Deployment

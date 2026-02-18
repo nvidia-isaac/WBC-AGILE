@@ -1,0 +1,113 @@
+# Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+#
+# NVIDIA CORPORATION and its licensors retain all intellectual property
+# and proprietary rights in and to this software, related documentation
+# and any modifications thereto.  Any use, reproduction, disclosure or
+# distribution of this software and related documentation without an express
+# license agreement from NVIDIA CORPORATION is strictly prohibited.
+version: 2
+workflow:
+  name: '{{workflow_name}}'
+  resources:
+    default:
+      cpu: 6
+      gpu: 1
+      memory: '{{memory}}'
+      storage: '{{storage}}'
+  tasks:
+    - name: train
+      image: '{{image}}'
+      command: ["/bin/bash"]
+      args: ["/tmp/entry.sh"]
+      environment:
+        ACCEPT_EULA: Y
+        OMNI_SERVER: '{{omni_server}}'
+        PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION: python
+      credentials:
+        omni-auth:
+          OMNI_PASS: omni_pass
+          OMNI_USER: omni_user
+        wandb:
+          WANDB_API_KEY: wandb_pass
+          WANDB_USERNAME: wandb_user
+      files:
+        - path: /tmp/entry.sh
+          contents: |
+            set -e
+
+            # /isaac-sim/kit/python/bin/huggingface-cli login --token {{hf_token}}
+
+            # Run tensorboard, VS Code server and filebrowser in the background to interact with a
+            # running workflow.
+            # ${ISAACLAB_PATH}/isaaclab.sh -p -m tensorboard.main --logdir {{output}} & TB_PID=$!
+            # code-server --port 9000 --auth none / & CODE_PID=$!
+            # filebrowser --noauth -r / & FILE_PID=$!
+            # ${ISAACLAB_PATH}/isaaclab.sh -p -m http.server 8000 --directory / & HTTP_PID=$!
+
+            # Function to cleanup background processes
+            # The cleanup is needed due to the processes that are launched above for tensorboard
+            # forwarding and filebrowser downloading.
+            # TODO: The plan is to move to wandb eventually and remove the need for this.
+            cleanup() {
+                echo "Cleaning up background processes..."
+                # Kill background services
+                kill $TB_PID $CODE_PID $FILE_PID $HTTP_PID 2>/dev/null || true
+                # Kill any remaining python processes
+                pkill -f "python" || true
+                # Clean up any remaining multiprocessing semaphores
+                rm -f /dev/shm/sem.* 2>/dev/null || true
+            }
+
+            # Launch training.
+            CMD="${ISAACLAB_PATH}/isaaclab.sh -p scripts/train.py "
+            CMD+="--headless "
+            CMD+="--num_envs {{num_envs}} "
+            CMD+="--task {{task_name}} "
+            CMD+="--logger {{logger}} "
+            CMD+="--log_project_name {{project_name}} "
+            CMD+="--run_name {{run_name}} "
+            CMD+="--max_iterations {{max_iterations}} "
+            CMD+="--video --video_interval_iter 200 "
+            # Only add seed parameter if it is defined
+            {% if seed is defined %}
+            CMD+="--seed {{seed}} "
+            {% endif %}
+            # Check if training from resume
+            if [ "{{resume}}" == "True" ]; then
+              CMD+="--resume True "
+              CMD+="--checkpoint ${RESUME_PATH:?}/${RESUME_CHECKPOINT:?} "
+            fi
+
+            echo $CMD
+            # Run the command in background and capture PID
+            eval $CMD & TRAIN_PID=$!
+
+            # Wait for training to complete
+            wait $TRAIN_PID
+
+            # Clean up background processes and resources after training completes
+            cleanup
+
+            # Exit explicitly
+            exit 0
+      outputs:
+        - dataset:
+            name: agile:{{workflow_id}}
+            path: outputs
+default-values:
+  # image_default is set by run.py when submitting; fallback for manual runs (must match run_config container_registry.image_name)
+  image_default: docker.io/yourorg/agile:latest
+  image: '{{image_default}}'
+  omni_server: omniverse://localhost
+  # Options: wandb and tensorboard
+  logger: wandb
+  workflow_name: agile
+  task_name: Standing-G1-v0
+  project_name: Standing-G1-v0
+  run_name: TO_BE_FILLED
+  num_envs: 4096
+  max_iterations: 20000
+  memory: 200Gi
+  storage: 200Gi
+timeout:
+  exec_timeout: 7d

@@ -1,0 +1,212 @@
+# Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+#
+# NVIDIA CORPORATION and its licensors retain all intellectual property
+# and proprietary rights in and to this software, related documentation
+# and any modifications thereto.  Any use, reproduction, disclosure or
+# distribution of this software and related documentation without an express
+# license agreement from NVIDIA CORPORATION is strictly prohibited.
+version: 2
+workflow:
+  name: '{{workflow_name}}'
+  resources:
+    default:
+      cpu: 4
+      gpu: 1
+      memory: 100Gi
+      storage: 100Gi
+  tasks:
+    - name: eval
+      image: '{{image}}'
+      command: ["/bin/bash"]
+      args: ["/tmp/entry.sh"]
+      environment:
+        ACCEPT_EULA: Y
+        OMNI_SERVER: '{{omni_server}}'
+        PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION: python
+      credentials:
+        omni-auth:
+          OMNI_PASS: omni_pass
+          OMNI_USER: omni_user
+        wandb:
+          WANDB_API_KEY: wandb_pass
+          WANDB_USERNAME: wandb_user
+      files:
+        - path: /tmp/entry.sh
+          contents: |
+            set -e
+
+            # Determine checkpoint source
+            USE_LOCAL_CHECKPOINT="{{use_local_checkpoint}}"
+
+            if [ "$USE_LOCAL_CHECKPOINT" = "true" ]; then
+              echo "=========================================="
+              echo "Using Bundled Local Checkpoint"
+              echo "=========================================="
+
+              # Find the bundled checkpoint (from Docker build args)
+              # The checkpoint is placed in /workspace/agile/policy/resume during build
+              CHECKPOINT_PATH=$(find /workspace/agile/policy/resume -name "*.pt" -type f 2>/dev/null | head -1)
+
+              if [ -z "$CHECKPOINT_PATH" ]; then
+                echo "ERROR: No bundled checkpoint found in container"
+                echo "Expected checkpoint in: /workspace/agile/policy/resume"
+                exit 1
+              fi
+
+              echo "Found checkpoint: $CHECKPOINT_PATH"
+
+            else
+              echo "=========================================="
+              echo "Downloading Checkpoint from Wandb"
+              echo "=========================================="
+              echo "Wandb run: {{wandb_run_path}}"
+              echo "Iteration: {{iteration}}"
+
+              # Download checkpoint from wandb inside container
+              CHECKPOINT_DIR="/tmp/checkpoints"
+              mkdir -p $CHECKPOINT_DIR
+
+              # Create Python script to download checkpoint
+              cat > /tmp/download_checkpoint.py << 'DOWNLOAD_SCRIPT'
+            import wandb
+            import sys
+
+            wandb_run_path = sys.argv[1]
+            iteration = int(sys.argv[2])
+            checkpoint_dir = sys.argv[3]
+
+            api = wandb.Api()
+            run = api.run(wandb_run_path)
+
+            if iteration == 0:
+                # Find latest checkpoint
+                files = list(run.files())
+                checkpoint_files = [f for f in files if f.name.startswith('model_') and f.name.endswith('.pt')]
+                if not checkpoint_files:
+                    raise FileNotFoundError('No checkpoints found in wandb run')
+
+                def get_iter(f):
+                    try:
+                        return int(f.name.split('_')[1].split('.')[0])
+                    except:
+                        return -1
+
+                latest = max(checkpoint_files, key=get_iter)
+                print(f'Downloading latest checkpoint: {latest.name}')
+                latest.download(root=checkpoint_dir, replace=True)
+                checkpoint_path = f'{checkpoint_dir}/{latest.name}'
+            else:
+                checkpoint_name = f'model_{iteration}.pt'
+                print(f'Downloading checkpoint: {checkpoint_name}')
+                file = run.file(checkpoint_name)
+                file.download(root=checkpoint_dir, replace=True)
+                checkpoint_path = f'{checkpoint_dir}/{checkpoint_name}'
+
+            # Save checkpoint path for bash
+            with open('/tmp/checkpoint_path.txt', 'w') as f:
+                f.write(checkpoint_path)
+
+            print(f'Downloaded to: {checkpoint_path}')
+            DOWNLOAD_SCRIPT
+
+              # Run the download script
+              ${ISAACLAB_PATH}/isaaclab.sh -p /tmp/download_checkpoint.py "{{wandb_run_path}}" "{{iteration}}" "$CHECKPOINT_DIR"
+
+              CHECKPOINT_PATH=$(cat /tmp/checkpoint_path.txt)
+              echo "Checkpoint downloaded to: $CHECKPOINT_PATH"
+            fi
+
+            echo ""
+            echo "=========================================="
+            echo "Running Evaluation"
+            echo "=========================================="
+            echo "Task: {{task_name}}"
+            echo "Checkpoint: $CHECKPOINT_PATH"
+            echo "Eval config: {{eval_config_path}}"
+            echo ""
+
+            # Run evaluation with deterministic scenario
+            ${ISAACLAB_PATH}/isaaclab.sh -p scripts/eval.py \
+              --task {{task_name}} \
+              --checkpoint "$CHECKPOINT_PATH" \
+              --eval_config {{eval_config_path}} \
+              --num_envs {{num_envs}} \
+              --run_evaluation \
+              --save_trajectories \
+              --headless
+
+            echo ""
+            echo "=========================================="
+            echo "Generating HTML Report"
+            echo "=========================================="
+
+            # Find the most recent evaluation log directory
+            if [ -d "logs/evaluation" ]; then
+              EVAL_LOG_DIR=$(ls -dt logs/evaluation/*/ 2>/dev/null | head -1)
+              if [ -z "$EVAL_LOG_DIR" ]; then
+                echo "ERROR: No evaluation log directory found in logs/evaluation/"
+                exit 1
+              fi
+              echo "Log directory: $EVAL_LOG_DIR"
+
+              # Generate HTML report using Isaac Lab Python
+              ${ISAACLAB_PATH}/isaaclab.sh -p agile/algorithms/evaluation/generate_report.py \
+                --log_dir "$EVAL_LOG_DIR" \
+                --no-browser
+
+              echo ""
+              echo "=========================================="
+              echo "Uploading Results to Wandb"
+              echo "=========================================="
+
+              # Upload results to wandb using Isaac Lab Python
+              if [ "$USE_LOCAL_CHECKPOINT" = "true" ]; then
+                # For local checkpoints, omit checkpoint_iteration
+                ${ISAACLAB_PATH}/isaaclab.sh -p agile/algorithms/evaluation/upload_to_wandb.py \
+                  --log_dir "$EVAL_LOG_DIR" \
+                  --wandb_project {{project_name}} \
+                  --wandb_run_name {{run_name}}_eval_local \
+                  --training_wandb_run "local_checkpoint"
+              else
+                # For wandb checkpoints, include iteration info
+                ${ISAACLAB_PATH}/isaaclab.sh -p agile/algorithms/evaluation/upload_to_wandb.py \
+                  --log_dir "$EVAL_LOG_DIR" \
+                  --wandb_project {{project_name}} \
+                  --wandb_run_name {{run_name}}_eval_iter{{iteration}} \
+                  --checkpoint_iteration {{iteration}} \
+                  --training_wandb_run "{{training_wandb_run}}"
+              fi
+            else
+              echo "ERROR: logs/evaluation directory not found - evaluation may have failed"
+              exit 1
+            fi
+
+            echo ""
+            echo "Evaluation complete!"
+
+            # Exit explicitly
+            exit 0
+      outputs:
+        - dataset:
+            name: agile:{{workflow_id}}
+            path: outputs
+        - dataset:
+            name: agile_eval:{{workflow_id}}
+            path: logs/evaluation
+default-values:
+  # image_default is set by run.py when submitting; fallback for manual runs (must match run_config container_registry.image_name)
+  image_default: docker.io/yourorg/agile:latest
+  image: '{{image_default}}'
+  omni_server: omniverse://localhost
+  workflow_name: agile_eval
+  task_name: Velocity-Height-G1-Dev-v0
+  project_name: agile_evaluation
+  run_name: eval
+  wandb_run_path: nvidia-isaac/project/run_id
+  eval_config_path: /workspace/agile/agile/algorithms/evaluation/configs/default_eval.yaml
+  num_envs: 4
+  iteration: 0
+  training_wandb_run: nvidia-isaac/project/run_id
+  use_local_checkpoint: false
+timeout:
+  exec_timeout: 2h

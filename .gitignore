@@ -10,6 +10,8 @@ outputs/**
 wandb/**
 assets/**
 agile/data/policy/eval/**
+agile/rl_env/assets/unitree_description/
+agile/rl_env/assets/unitree_mujoco/
 
 **/exported/**
 
