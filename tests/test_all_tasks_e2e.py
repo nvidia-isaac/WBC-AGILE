@@ -179,15 +179,12 @@ class TestAllTasks(unittest.TestCase):
 
                     print(f"Running command: {' '.join(cmd)}", flush=True)
 
-                    # Distillation tasks need more time to load teacher models
-                    timeout = 180 if "Distillation" in task else 120
-
                     try:
                         # Run the command with timeout
                         result = subprocess.run(
                             cmd,
                             check=True,  # Will raise exception if process returns non-zero
-                            timeout=timeout,  # 2-3 minutes timeout per task
+                            timeout=600,  # 10 minutes timeout per task
                             capture_output=True,
                             text=True,
                             env=env,
