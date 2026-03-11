@@ -127,6 +127,8 @@ class PPO:
                 eps=reward_normalization_cfg["epsilon"],
                 gamma=gamma,
                 decay=reward_normalization_cfg["decay"],
+                return_scale_decay=reward_normalization_cfg.get("return_scale_decay", 0.999),
+                outlier_threshold=reward_normalization_cfg.get("outlier_threshold", 10.0),
             ).to(device)
         else:
             self.reward_normalizer = None
@@ -229,6 +231,29 @@ class PPO:
                 1,
             )
 
+        # Termination handling: bootstrap + penalty/bonus (post-normalization, scale-invariant)
+        # Per-env sigma tensors are computed by the vec env wrapper from DoneTermCfg metadata.
+        time_outs = infos.get("time_outs", torch.zeros_like(dones))
+        not_timed_out = (~time_outs.bool()).float().to(self.device)
+        # Bad terminations: bootstrap (value-neutral) then subtract σ (strictly worse)
+        if "bad_termination_sigma" in infos:
+            bad_sigma = infos["bad_termination_sigma"].to(self.device)
+            # Exclude envs already bootstrapped by timeout handler
+            bad_mask = (bad_sigma > 0).float() * not_timed_out
+            self.transition.rewards += self.gamma * torch.squeeze(
+                self.transition.values * bad_mask.unsqueeze(1), 1
+            )
+            self.transition.rewards -= bad_sigma
+        # Good terminations: bootstrap (value-neutral) then add σ (strictly better)
+        if "good_termination_sigma" in infos:
+            good_sigma = infos["good_termination_sigma"].to(self.device)
+            # Exclude envs already bootstrapped by timeout handler
+            good_mask = (good_sigma > 0).float() * not_timed_out
+            self.transition.rewards += self.gamma * torch.squeeze(
+                self.transition.values * good_mask.unsqueeze(1), 1
+            )
+            self.transition.rewards += good_sigma
+
         # record the transition
         self.storage.add_transitions(self.transition)
         self.transition.clear()
@@ -243,6 +268,9 @@ class PPO:
             self.lam,
             normalize_advantage=not self.normalize_advantage_per_mini_batch,
         )
+        # Update the return-scale correction to account for temporal reward correlation
+        if self.reward_normalizer is not None:
+            self.reward_normalizer.update_return_scale(self.storage.returns)
 
     def update(self):  # noqa: C901
         mean_value_loss = 0
@@ -412,8 +440,8 @@ class PPO:
             else:
                 loss = surrogate_loss + self.value_loss_coef * value_loss - self.entropy_coef * entropy_batch.mean()
 
-            if loss.abs().max() > 100.0 or loss.isnan().any():
-                print(f"Loss is greater than 100: {loss.mean()}")
+            if loss.abs().max() > 1000.0 or loss.isnan().any():
+                print(f"Loss is greater than 1000: {loss.mean()}")
                 print(f"Surrogate loss: {surrogate_loss.mean()}")
                 print(f"Value loss: {value_loss.mean()}")
                 print(f"Entropy loss: {entropy_batch.mean()}")

@@ -139,6 +139,14 @@ class ReturnVarianceNormalization(nn.Module):
 
     Dividing rewards by sigma / sqrt(1 - gamma^2) gives Var(G) ~ 1.
 
+    This analytical formula assumes i.i.d. rewards. In practice, RL rewards are
+    temporally correlated (e.g., a fallen robot produces many consecutive low rewards),
+    inflating return variance beyond the i.i.d. prediction. To correct for this,
+    the normalizer can optionally track the actual return standard deviation and apply
+    a correction factor. Since ``return_std * correction = K`` (constant for stationary
+    rewards regardless of current correction), we EMA-track the ideal correction
+    ``K = measured_return_std * current_correction`` for oscillation-free convergence.
+
     Uses exponential moving average (EMA) for variance tracking, allowing
     adaptation to curriculum changes during training.
 
@@ -149,34 +157,110 @@ class ReturnVarianceNormalization(nn.Module):
         decay: EMA decay factor. Higher = slower adaptation.
             decay=0.999 -> ~693 steps half-life
             decay=0.9999 -> ~6931 steps half-life
+        return_scale_decay: EMA decay for the return-std correction factor.
+            This is updated once per rollout (not per step). Set to None to
+            disable return-scale correction (i.i.d. assumption only).
+            Default: 0.999.
+        outlier_threshold: Number of standard deviations to consider as outlier.
+            Samples beyond this threshold are clipped when updating statistics
+            and the normalized output is also clipped to this range.
+            Set to None to disable outlier filtering. Default: 10.0.
     """
 
-    def __init__(self, shape, eps=1e-2, gamma=0.99, decay=0.999):
+    def __init__(
+        self,
+        shape,
+        eps=1e-2,
+        gamma=0.99,
+        decay=0.999,
+        return_scale_decay: float | None = 0.999,
+        outlier_threshold: float | None = 10.0,
+    ):
         super().__init__()
         self.eps = eps
         self.gamma = gamma
         self.decay = decay
         self.gamma_factor = 1.0 / math.sqrt(1 - gamma**2)
+        self.return_scale_decay = return_scale_decay
+        self.outlier_threshold = outlier_threshold
 
-        # EMA statistics for variance
-        self.register_buffer("_var", torch.ones(shape).unsqueeze(0))
-        self.register_buffer("_std", torch.ones(shape).unsqueeze(0))
-        self.register_buffer("_mean", torch.zeros(shape).unsqueeze(0))
+        # EMA statistics for variance (scalars across all envs and time)
+        self.register_buffer("_var", torch.ones(1))
+        self.register_buffer("_std", torch.ones(1))
+        self.register_buffer("_mean", torch.zeros(1))
+
+        # Return-scale correction: accounts for temporal correlation in rewards.
+        # Initialized to 1.0 (no correction, pure i.i.d. assumption).
+        self.register_buffer("_return_correction", torch.ones(1))
 
     def forward(self, rew):
         if self.training:
             self.update(rew)
-        # Normalize: rew / (sigma / sqrt(1 - gamma^2)) = rew * sqrt(1 - gamma^2) / sigma
-        return rew / (self._std * self.gamma_factor + self.eps)
+        # Normalize: rew / (sigma * gamma_factor * return_correction)
+        scale = self._std * self.gamma_factor * self._return_correction + self.eps
+        normalized = rew / scale
+
+        # Clip normalized output to outlier threshold range (shifted by normalized mean)
+        if self.outlier_threshold is not None:
+            normalized_mean = self._mean / scale
+            normalized = torch.clamp(
+                normalized,
+                normalized_mean - self.outlier_threshold,
+                normalized_mean + self.outlier_threshold,
+            )
+
+        return normalized
 
     @torch.jit.unused
     def update(self, rew):
-        # Compute batch statistics
-        var_x = torch.var(rew, dim=0, unbiased=False, keepdim=True)
-        mean_x = torch.mean(rew, dim=0, keepdim=True)
+        # Filter outliers before computing statistics
+        if self.outlier_threshold is not None:
+            # Clip rewards to within outlier_threshold standard deviations of current mean
+            lower = self._mean - self.outlier_threshold * (self._std + self.eps)
+            upper = self._mean + self.outlier_threshold * (self._std + self.eps)
+            rew_clipped = torch.clamp(rew, lower, upper)
+        else:
+            rew_clipped = rew
+
+        # Compute statistics across all envs and batch (scalar output)
+        var_x = torch.var(rew_clipped, unbiased=False)
+        mean_x = torch.mean(rew_clipped)
 
         # EMA update: stat = decay * stat + (1 - decay) * new_stat
         alpha = 1.0 - self.decay
         self._mean = self.decay * self._mean + alpha * mean_x
         self._var = self.decay * self._var + alpha * var_x
         self._std = torch.sqrt(self._var)
+
+    @torch.jit.unused
+    def update_return_scale(self, returns: torch.Tensor):
+        """Update the return-scale correction from measured GAE returns.
+
+        For stationary rewards, ``return_std * correction = K`` (constant) regardless
+        of the current correction value. So we EMA-track ``K`` directly, which
+        converges without oscillation.
+
+        Args:
+            returns: GAE return targets from the rollout buffer,
+                shape ``[num_steps, num_envs, 1]`` or ``[N, 1]``.
+        """
+        if self.return_scale_decay is None:
+            return
+        return_std = returns.std().clamp(min=1e-6)
+        # ideal_correction = return_std * current_correction
+        # This equals K (the true scale factor) regardless of current correction,
+        # because scaling rewards by 1/c scales returns by 1/c.
+        ideal_correction = return_std * self._return_correction
+        alpha = 1.0 - self.return_scale_decay
+        self._return_correction = self.return_scale_decay * self._return_correction + alpha * ideal_correction
+
+    def load_state_dict(self, state_dict, strict=True):
+        """Load state dict with backward compatibility for shape changes."""
+        # Handle shape mismatch from older checkpoints (e.g., [1, 1] -> [1])
+        for key in ["_var", "_std", "_mean"]:
+            if key in state_dict:
+                state_dict[key] = state_dict[key].flatten()[:1]
+        # Handle missing _return_correction from older checkpoints
+        if "_return_correction" not in state_dict:
+            state_dict["_return_correction"] = torch.ones(1)
+        return super().load_state_dict(state_dict, strict=strict)

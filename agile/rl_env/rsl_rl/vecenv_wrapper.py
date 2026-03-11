@@ -99,6 +99,10 @@ class RslRlVecEnvWrapper(VecEnv):
         # modify the action space to the clip range
         self._modify_action_space()
 
+        # build termination handling map from DoneTermCfg metadata
+        self._termination_handling: dict[str, tuple[str, float]] = {}
+        self._init_termination_handling()
+
         # reset at the start since the RSL-RL runner does not call reset
         self.env.reset()
 
@@ -202,6 +206,10 @@ class RslRlVecEnvWrapper(VecEnv):
         if not self.unwrapped.cfg.is_finite_horizon:
             extras["time_outs"] = truncated
 
+        # aggregate per-term termination sigmas for good/bad termination handling
+        if self._termination_handling:
+            self._compute_termination_sigmas(extras)
+
         # return the step information
         return obs, rew, dones, extras
 
@@ -211,6 +219,47 @@ class RslRlVecEnvWrapper(VecEnv):
     """
     Helper functions
     """
+
+    def _init_termination_handling(self):
+        """Scan termination configs for good/bad terms with sigma metadata.
+
+        Builds a mapping of ``{term_name: (termination_type, sigma)}`` from
+        :class:`DoneTermCfg` instances that have ``termination_type`` set to
+        ``"good"`` or ``"bad"``.
+        """
+        if not isinstance(self.unwrapped, ManagerBasedRLEnv):
+            return
+        term_manager = self.unwrapped.termination_manager
+        cfg = self.unwrapped.cfg.terminations
+        for name in term_manager._term_names:
+            term_cfg = getattr(cfg, name, None)
+            if term_cfg is None:
+                continue
+            term_type = getattr(term_cfg, "termination_type", "neutral")
+            if term_type in ("good", "bad"):
+                sigma = getattr(term_cfg, "sigma", 5.0)
+                self._termination_handling[name] = (term_type, sigma)
+
+    def _compute_termination_sigmas(self, extras: dict):
+        """Compute per-env aggregated sigma for good/bad terminations.
+
+        For each environment, takes the max sigma across all fired good (or bad)
+        termination terms. Adds ``bad_termination_sigma`` and/or
+        ``good_termination_sigma`` tensors to extras.
+        """
+        term_manager = self.unwrapped.termination_manager
+        bad_sigma = torch.zeros(self.num_envs, device=self.device)
+        good_sigma = torch.zeros(self.num_envs, device=self.device)
+        for name, (term_type, sigma) in self._termination_handling.items():
+            term_mask = term_manager.get_term(name)
+            if term_type == "bad":
+                bad_sigma[term_mask] = torch.clamp_min(bad_sigma[term_mask], sigma)
+            else:  # "good"
+                good_sigma[term_mask] = torch.clamp_min(good_sigma[term_mask], sigma)
+        if bad_sigma.any():
+            extras["bad_termination_sigma"] = bad_sigma
+        if good_sigma.any():
+            extras["good_termination_sigma"] = good_sigma
 
     def _modify_action_space(self):
         """Modify the action space to the clip range."""

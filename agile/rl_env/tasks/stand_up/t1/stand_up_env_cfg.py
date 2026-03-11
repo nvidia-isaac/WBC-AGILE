@@ -36,6 +36,7 @@ from isaaclab.utils.noise import AdditiveUniformNoiseCfg as Unoise
 from agile.rl_env import mdp
 from agile.rl_env.assets.robots import booster_t1
 from agile.rl_env.mdp.terrains import STAND_UP_ROUGH_TERRAIN_CFG  # noqa: F401, F403
+from agile.rl_env.termination_cfg import DoneTermCfg as DoneTermEx
 
 FILE_DIR = pathlib.Path(__file__).parent
 REPO_DIR = FILE_DIR.parent.parent.parent
@@ -346,8 +347,10 @@ class TerminationsCfg:
 
     time_out = DoneTerm(func=mdp.time_out, time_out=True)
 
-    no_height_progress = DoneTerm(
+    no_height_progress = DoneTermEx(
         func=mdp.no_height_progress,
+        termination_type="bad",
+        sigma=1.0,
         params={
             "asset_cfg": SceneEntityCfg("robot", body_names="Trunk"),
             "sensor_cfg": SceneEntityCfg("height_measurement_sensor"),

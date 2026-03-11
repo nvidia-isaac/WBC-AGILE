@@ -35,3 +35,14 @@ class RslRlRewardNormalizationCfg:
 
     epsilon: float = 1e-2
     """Epsilon for numerical stability when dividing by standard deviation."""
+
+    return_scale_decay: float | None = 0.999
+    """EMA decay for the return-std correction factor that accounts for temporal
+    reward correlation. Updated once per rollout (not per step).
+    Set to None to disable (i.i.d. assumption only). Default: 0.999."""
+
+    outlier_threshold: float | None = 10.0
+    """Number of standard deviations to consider as outlier.
+    Samples beyond this threshold are clipped when updating statistics,
+    and the normalized output is also clipped to this range.
+    Set to None to disable outlier filtering."""
