@@ -14,6 +14,7 @@
 # limitations under the License.
 
 from .aestetic_rewards import *  # noqa: F401, F403
+from .motion_tracking_rewards import *  # noqa: F401, F403
 from .regularization_rewards import *  # noqa: F401, F403
 from .reward_visualizer import *  # noqa: F401, F403
 from .reward_visualizer_cfg import *  # noqa: F401, F403

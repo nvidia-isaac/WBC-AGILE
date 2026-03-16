@@ -36,6 +36,7 @@ parser.add_argument("--task", type=str, required=True, help="Gym task ID to load
 parser.add_argument("--num_envs", type=int, default=1, help="Number of environments to simulate.")
 parser.add_argument("--video", action="store_true", default=False, help="Record a video.")
 parser.add_argument("--video_length", type=int, default=400, help="Length of the recorded video (in steps).")
+parser.add_argument("--num_steps", type=int, default=0, help="Number of steps to run (0 = unlimited).")
 parser.add_argument("--disable_fabric", action="store_true", default=False, help="Disable Fabric (use USD I/O).")
 parser.add_argument("--real-time", action="store_true", default=False, help="Run close to real-time if possible.")
 parser.add_argument(
@@ -214,6 +215,9 @@ def main() -> None:
             if args_cli.video:
                 if timestep == args_cli.video_length:
                     break
+
+            if args_cli.num_steps > 0 and timestep >= args_cli.num_steps:
+                break
 
             # Sleep to approximate real-time, if requested
             if args_cli.real_time:

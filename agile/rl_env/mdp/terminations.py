@@ -275,7 +275,11 @@ def bad_base_pose(
     base_pos_threshold: float,
     command_name: str,
 ) -> torch.Tensor:
-    """Terminate when the robot is away from the trajectory."""
+    """Terminate when the anchor position error exceeds a threshold.
+
+    Works with any command term that exposes ``command_anchor_pos_w`` and
+    ``robot_anchor_pos_w`` (e.g. ``TrackingCommand``, ``MotionCommand``).
+    """
     command = env.command_manager.get_term(command_name)
     base_pos_error = torch.norm(command.command_anchor_pos_w - command.robot_anchor_pos_w, dim=-1)
     return base_pos_error > base_pos_threshold
@@ -286,7 +290,11 @@ def bad_base_rotation(
     base_ori_threshold: float,
     command_name: str,
 ) -> torch.Tensor:
-    """Terminate when the robot is away from the trajectory."""
+    """Terminate when the anchor orientation error exceeds a threshold.
+
+    Works with any command term that exposes ``command_anchor_quat_w`` and
+    ``robot_anchor_quat_w`` (e.g. ``TrackingCommand``, ``MotionCommand``).
+    """
     command = env.command_manager.get_term(command_name)
     base_ori_error = math_utils.quat_error_magnitude(command.command_anchor_quat_w, command.robot_anchor_quat_w)
     return base_ori_error > base_ori_threshold
@@ -301,6 +309,70 @@ def bad_joint_pos(
     command = env.command_manager.get_term(command_name)
     joint_pos_error = torch.norm(command.command_tracked_joint_pos - command.robot_tracked_joint_pos, dim=-1)
     return joint_pos_error > joint_pos_threshold
+
+
+##
+# Whole-body motion tracking terminations
+##
+
+
+def bad_anchor_pos_z_only(env: ManagerBasedRLEnv, command_name: str, threshold: float) -> torch.Tensor:
+    """Terminate if the anchor Z position error exceeds the threshold.
+
+    Works with any command term that exposes ``command_anchor_pos_w`` and
+    ``robot_anchor_pos_w`` (e.g. ``TrackingCommand``, ``MotionCommand``).
+    """
+    command = env.command_manager.get_term(command_name)
+    return torch.abs(command.command_anchor_pos_w[:, -1] - command.robot_anchor_pos_w[:, -1]) > threshold
+
+
+def bad_anchor_ori(
+    env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg, command_name: str, threshold: float
+) -> torch.Tensor:
+    """Terminate if the anchor orientation error exceeds the threshold.
+
+    Uses projected-gravity comparison, which is different from ``bad_base_rotation``
+    (that uses ``quat_error_magnitude``).
+
+    Works with any command term that exposes ``command_anchor_quat_w`` and
+    ``robot_anchor_quat_w`` (e.g. ``TrackingCommand``, ``MotionCommand``).
+    """
+    asset: RigidObject | Articulation = env.scene[asset_cfg.name]
+
+    command = env.command_manager.get_term(command_name)
+    motion_projected_gravity_b = math_utils.quat_apply_inverse(command.command_anchor_quat_w, asset.data.GRAVITY_VEC_W)
+
+    robot_projected_gravity_b = math_utils.quat_apply_inverse(command.robot_anchor_quat_w, asset.data.GRAVITY_VEC_W)
+
+    return (motion_projected_gravity_b[:, 2] - robot_projected_gravity_b[:, 2]).abs() > threshold
+
+
+def bad_motion_body_pos(
+    env: ManagerBasedRLEnv, command_name: str, threshold: float, body_names: list[str] | None = None
+) -> torch.Tensor:
+    """Terminate if any body position error exceeds the threshold."""
+    from agile.rl_env.mdp.commands.motion_tracking_commands import MotionCommand
+    from agile.rl_env.mdp.rewards.motion_tracking_rewards import _get_body_indices
+
+    command: MotionCommand = env.command_manager.get_term(command_name)
+
+    body_indices = _get_body_indices(command, body_names)
+    error = torch.norm(command.body_pos_relative_w[:, body_indices] - command.robot_body_pos_w[:, body_indices], dim=-1)
+    return torch.any(error > threshold, dim=-1)
+
+
+def bad_motion_body_pos_z_only(
+    env: ManagerBasedRLEnv, command_name: str, threshold: float, body_names: list[str] | None = None
+) -> torch.Tensor:
+    """Terminate if any body Z position error exceeds the threshold."""
+    from agile.rl_env.mdp.commands.motion_tracking_commands import MotionCommand
+    from agile.rl_env.mdp.rewards.motion_tracking_rewards import _get_body_indices
+
+    command: MotionCommand = env.command_manager.get_term(command_name)
+
+    body_indices = _get_body_indices(command, body_names)
+    error = torch.abs(command.body_pos_relative_w[:, body_indices, -1] - command.robot_body_pos_w[:, body_indices, -1])
+    return torch.any(error > threshold, dim=-1)
 
 
 def out_of_bound(

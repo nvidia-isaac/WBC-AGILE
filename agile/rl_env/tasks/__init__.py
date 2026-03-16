@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from . import debug, locomotion, locomotion_height, pick_place, stand_up
+from . import debug, locomotion, locomotion_height, pick_place, stand_up, tracking
 
 __all__ = [
     "debug",
@@ -21,4 +21,5 @@ __all__ = [
     "locomotion_height",
     "pick_place",
     "stand_up",
+    "tracking",
 ]

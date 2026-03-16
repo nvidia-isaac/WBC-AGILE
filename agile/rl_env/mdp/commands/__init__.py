@@ -14,6 +14,8 @@
 # limitations under the License.
 
 
+from agile.common.motion_data import MotionData
+
 from .commands import (
     UniformNullVelocityCommand,
     UniformVelocityBaseHeightCommand,
@@ -24,6 +26,8 @@ from .commands_cfg import (
     UniformVelocityBaseHeightCommandCfg,
     UniformVelocityGaitBaseHeightCommandCfg,
 )
+from .motion_tracking_commands import MotionCommand
+from .motion_tracking_commands_cfg import MotionCommandCfg
 from .tracking_commands import TrackingCommand
 from .tracking_commands_cfg import TrackingCommandCfg
 
@@ -36,4 +40,7 @@ __all__ = [
     "UniformVelocityGaitBaseHeightCommandCfg",
     "TrackingCommand",
     "TrackingCommandCfg",
+    "MotionCommand",
+    "MotionCommandCfg",
+    "MotionData",
 ]

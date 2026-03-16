@@ -25,14 +25,23 @@ from agile.rl_env.mdp.commands.tracking_commands import TrackingCommand
 
 
 def motion_global_anchor_position_error_exp(env: ManagerBasedEnv, command_name: str, std: float) -> torch.Tensor:
-    command: TrackingCommand = env.command_manager.get_term(command_name)
+    """Reward for tracking anchor position using exponential kernel.
+
+    Works with any command term that exposes ``command_anchor_pos_w`` and
+    ``robot_anchor_pos_w`` (e.g. ``TrackingCommand``, ``MotionCommand``).
+    """
+    command = env.command_manager.get_term(command_name)
     error = torch.sum(torch.square(command.command_anchor_pos_w - command.robot_anchor_pos_w), dim=-1)
     return torch.exp(-error / std**2)
 
 
 def motion_global_anchor_orientation_error_exp(env: ManagerBasedEnv, command_name: str, std: float) -> torch.Tensor:
-    # TODO: We may only care about the yaw angle difference
-    command: TrackingCommand = env.command_manager.get_term(command_name)
+    """Reward for tracking anchor orientation using exponential kernel.
+
+    Works with any command term that exposes ``command_anchor_quat_w`` and
+    ``robot_anchor_quat_w`` (e.g. ``TrackingCommand``, ``MotionCommand``).
+    """
+    command = env.command_manager.get_term(command_name)
     error = quat_error_magnitude(command.command_anchor_quat_w, command.robot_anchor_quat_w) ** 2
     return torch.exp(-error / std**2)
 

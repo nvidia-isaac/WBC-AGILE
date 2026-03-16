@@ -21,12 +21,19 @@ from isaaclab.managers import SceneEntityCfg
 from isaaclab.sensors import FrameTransformer
 from isaaclab.utils.math import matrix_from_quat, quat_apply_inverse, subtract_frame_transforms
 
+from agile.isaaclab_extras.utils.io_descriptors import generic_io_descriptor, record_dtype, record_shape
 from agile.rl_env.mdp.commands.tracking_commands import TrackingCommand
 
 
+@generic_io_descriptor(observation_type="MotionTracking", on_inspect=[record_shape, record_dtype], units="m")
 def motion_anchor_pos_b(env: ManagerBasedEnv, command_name: str) -> torch.Tensor:
-    """Target anchor position relative to current anchor in body frame. Shape: (num_envs, 3)."""
-    command: TrackingCommand = env.command_manager.get_term(command_name)
+    """Target anchor position relative to current anchor in body frame. Shape: (num_envs, 3).
+
+    Works with any command term that exposes ``command_anchor_pos_w``,
+    ``command_anchor_quat_w``, ``robot_anchor_pos_w``, and ``robot_anchor_quat_w``
+    (e.g. ``TrackingCommand``, ``MotionCommand``).
+    """
+    command = env.command_manager.get_term(command_name)
 
     pos, _ = subtract_frame_transforms(
         command.robot_anchor_pos_w,
@@ -38,9 +45,15 @@ def motion_anchor_pos_b(env: ManagerBasedEnv, command_name: str) -> torch.Tensor
     return pos.view(env.num_envs, -1)
 
 
+@generic_io_descriptor(observation_type="MotionTracking", on_inspect=[record_shape, record_dtype], units="unit")
 def motion_anchor_ori_b(env: ManagerBasedEnv, command_name: str) -> torch.Tensor:
-    """Target anchor orientation relative to current anchor as flattened rotation matrix. Shape: (num_envs, 6)."""
-    command: TrackingCommand = env.command_manager.get_term(command_name)
+    """Target anchor orientation relative to current anchor as flattened rotation matrix. Shape: (num_envs, 6).
+
+    Works with any command term that exposes ``command_anchor_pos_w``,
+    ``command_anchor_quat_w``, ``robot_anchor_pos_w``, and ``robot_anchor_quat_w``
+    (e.g. ``TrackingCommand``, ``MotionCommand``).
+    """
+    command = env.command_manager.get_term(command_name)
 
     _, ori = subtract_frame_transforms(
         command.robot_anchor_pos_w,
@@ -52,12 +65,14 @@ def motion_anchor_ori_b(env: ManagerBasedEnv, command_name: str) -> torch.Tensor
     return mat[..., :2].reshape(mat.shape[0], -1)
 
 
+@generic_io_descriptor(observation_type="MotionTracking", on_inspect=[record_shape, record_dtype], units="rad")
 def motion_joint_pos_delta(env: ManagerBasedEnv, command_name: str) -> torch.Tensor:
     """Target joint positions minus current joint positions. Shape: (num_envs, num_tracked_joints)."""
     command: TrackingCommand = env.command_manager.get_term(command_name)
     return command.command_tracked_joint_pos - command.robot_tracked_joint_pos
 
 
+@generic_io_descriptor(observation_type="MotionTracking", on_inspect=[record_shape, record_dtype], units="m")
 def object_to_hand_pos_b(
     env: ManagerBasedEnv,
     command_name: str,
@@ -98,6 +113,7 @@ def object_to_hand_pos_b(
     return object_to_hand_b
 
 
+@generic_io_descriptor(observation_type="MotionTracking", on_inspect=[record_shape, record_dtype], units="unit")
 def trajectory_progress(env: ManagerBasedEnv, command_name: str) -> torch.Tensor:
     """Observation of normalized trajectory progress.
 
@@ -126,6 +142,7 @@ def trajectory_progress(env: ManagerBasedEnv, command_name: str) -> torch.Tensor
     return progress.unsqueeze(-1)  # (num_envs, 1)
 
 
+@generic_io_descriptor(observation_type="MotionTracking", on_inspect=[record_shape, record_dtype], units="m")
 def object_pos_error(env: ManagerBasedEnv, command_name: str) -> torch.Tensor:
     """Observation of object position error (target - current).
 

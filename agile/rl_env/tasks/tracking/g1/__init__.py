@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -13,14 +13,21 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from .events import *  # noqa: F401, F403
-from .fallen_state_cache import (  # noqa: F401
-    compute_fallen_state_cache_key,
-    get_fallen_state_cache_path,
+
+import gymnasium as gym
+
+from . import agents
+
+##
+# Register Gym environments.
+##
+
+gym.register(
+    id="Tracking-Flat-G1-v0",
+    entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": f"{__name__}.flat_env_cfg:G1FlatEnvCfg",
+        "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_rl_ppo_cfg:G1FlatPPORunnerCfg",
+    },
 )
-from .fallen_state_dataset import (  # noqa: F401
-    FallenStateDataset,
-    FallenStateDatasetCfg,
-)
-from .motion_tracking_events import *  # noqa: F401, F403
-from .reset_from_fallen_dataset import reset_from_fallen_dataset  # noqa: F401
