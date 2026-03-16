@@ -39,11 +39,16 @@ def __getattr__(name):
         from .velocity_height_scheduler import VelocityHeightScheduler
 
         return VelocityHeightScheduler
+    elif name == "RandomCommandScheduler":
+        from .random_command_scheduler import RandomCommandScheduler
+
+        return RandomCommandScheduler
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 __all__ = [
     "PolicyEvaluator",
+    "RandomCommandScheduler",
     "TrajectoryLogger",
     "TrajectoryReportGenerator",
     "VelocityHeightScheduler",

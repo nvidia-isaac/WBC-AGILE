@@ -38,6 +38,7 @@ class TrajectoryLogger:
         env=None,
         fields_to_save: list[str] | None = None,
         joint_groups: dict | None = None,
+        provenance: dict | None = None,
         verbose: bool = False,
     ):
         """Initialize trajectory logger.
@@ -51,6 +52,9 @@ class TrajectoryLogger:
                            Example: ["joint_pos", "joint_vel", "root_pos"]
             joint_groups: Dict mapping group names to joint indices. Saved to metadata for report generation.
                          Example: {"upper_body": [0,1,2], "lower_body": [3,4,5]}
+            provenance: Optional dict recording how this evaluation was produced.
+                       Example: {"checkpoint": "/path/to/model.pt", "task": "MyTask-v0",
+                                 "eval_config": "/path/to/config.yaml"}
             verbose: Whether to print detailed logging information
         """
         self.output_dir = Path(output_dir)
@@ -58,6 +62,7 @@ class TrajectoryLogger:
         self.physics_dt = physics_dt
         self.fields_to_save = fields_to_save  # None means save all
         self.joint_groups = joint_groups
+        self.provenance = provenance
         self.verbose = verbose
 
         # Create output directory
@@ -66,6 +71,8 @@ class TrajectoryLogger:
         # Extract and save metadata if environment provided
         if env is not None:
             self._save_metadata(env)
+        elif provenance is not None:
+            self._save_provenance_only()
 
         if self.verbose:
             print(f"TrajectoryLogger initialized. Saving to: {self.trajectories_dir}")
@@ -111,7 +118,8 @@ class TrajectoryLogger:
             "joint_vel_limits": joint_vel_limits,  # [num_joints] - max absolute velocity
             "max_episode_length": getattr(env, "max_episode_length", None),
             "task_name": getattr(env.cfg, "name", "unknown") if hasattr(env, "cfg") else "unknown",
-            "joint_groups": joint_groups_metadata,  # NEW: Joint group information
+            "joint_groups": joint_groups_metadata,
+            "provenance": self.provenance,
         }
 
         # Save to JSON file
@@ -122,6 +130,22 @@ class TrajectoryLogger:
         if self.verbose:
             print(f"  Saved metadata to: {metadata_path}")
             print(f"    Joints: {num_joints}")
+
+    def _save_provenance_only(self):
+        """Save a minimal metadata file containing only provenance info.
+
+        Called when no environment is available but provenance was provided.
+        """
+        metadata = {
+            "physics_dt": self.physics_dt,
+            "provenance": self.provenance,
+        }
+        metadata_path = self.trajectories_dir / "metadata.json"
+        with open(metadata_path, "w") as f:
+            json.dump(metadata, f, indent=2)
+
+        if self.verbose:
+            print(f"  Saved provenance metadata to: {metadata_path}")
 
     def log_episodes(
         self,

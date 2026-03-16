@@ -107,6 +107,44 @@ parser.add_argument(
     default=False,
     help="Export IO descriptor YAML file to the exported policy directory.",
 )
+# Random command scheduling
+parser.add_argument(
+    "--random_commands",
+    type=str,
+    nargs="+",
+    default=None,
+    help=(
+        "Enable random command scheduling. Specify which fields to randomize: "
+        "lin_vel_x, lin_vel_y, ang_vel_z, base_height, or 'all'. "
+        "Example: --random_commands lin_vel_x ang_vel_z"
+    ),
+)
+parser.add_argument(
+    "--random_interval",
+    type=float,
+    default=2.0,
+    help="Seconds between random command resamples (default: 2.0).",
+)
+parser.add_argument(
+    "--random_seed",
+    type=int,
+    default=None,
+    help="RNG seed for random command scheduling (default: non-deterministic).",
+)
+# Observation noise injection
+parser.add_argument(
+    "--noise_scale",
+    type=float,
+    default=None,
+    help="Gaussian noise standard deviation to add to observations before policy inference. "
+    "Useful for stress-testing policy robustness.",
+)
+parser.add_argument(
+    "--noise_seed",
+    type=int,
+    default=None,
+    help="RNG seed for observation noise injection (default: non-deterministic).",
+)
 
 # append RSL-RL cli arguments
 cli_args.add_rsl_rl_args(parser)
@@ -424,9 +462,19 @@ def main():
     # Get the control timestep (not physics timestep - accounts for decimation)
     dt = env.unwrapped.step_dt
 
-    # Create scheduler if eval config was loaded
+    # Create scheduler: random commands take priority over deterministic eval_config
     scheduler = None
-    if eval_config is not None:
+    if args_cli.random_commands is not None:
+        from agile.algorithms.evaluation.random_command_scheduler import RandomCommandScheduler
+
+        scheduler = RandomCommandScheduler(
+            env,
+            randomize_fields=args_cli.random_commands,
+            interval=args_cli.random_interval,
+            seed=args_cli.random_seed,
+            verbose=True,
+        )
+    elif eval_config is not None:
         from agile.algorithms.evaluation.velocity_height_scheduler import VelocityHeightScheduler
 
         # Validate num_envs matches
@@ -475,6 +523,24 @@ def main():
             total_episodes = args_cli.num_envs
             print(f"[INFO] Will collect {total_episodes} episodes")
 
+        # Build provenance metadata for reproducibility
+        import sys
+
+        provenance = {
+            "checkpoint": str(resume_path),
+            "task": args_cli.task,
+            "eval_config": args_cli.eval_config,
+            "num_envs": env.num_envs,
+            "num_steps": args_cli.num_steps,
+            "noise_scale": args_cli.noise_scale,
+            "noise_seed": args_cli.noise_seed,
+            "random_commands": args_cli.random_commands,
+            "random_interval": args_cli.random_interval,
+            "random_seed": args_cli.random_seed,
+            "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
+            "command_line": " ".join(sys.argv),
+        }
+
         evaluator = PolicyEvaluator(
             env,
             task_name=args_cli.task,
@@ -484,6 +550,7 @@ def main():
             save_trajectories=args_cli.save_trajectories,
             trajectory_fields=args_cli.trajectory_fields,
             joint_group_config=joint_group_config,
+            provenance=provenance,
         )
 
     env.reset()
@@ -504,6 +571,14 @@ def main():
         hasattr(obs, "values") and callable(getattr(obs, "values", None)) and not isinstance(obs, torch.Tensor)
     )
 
+    # Set up observation noise generator if requested
+    noise_generator = None
+    if args_cli.noise_scale is not None and args_cli.noise_scale > 0:
+        noise_generator = torch.Generator(device=env.unwrapped.device)
+        if args_cli.noise_seed is not None:
+            noise_generator.manual_seed(args_cli.noise_seed)
+        print(f"[INFO] Observation noise enabled: scale={args_cli.noise_scale}, seed={args_cli.noise_seed}")
+
     # simulate environment
     while simulation_app.is_running() and num_steps < args_cli.num_steps:
         start_time = time.time()
@@ -519,6 +594,20 @@ def main():
                 obs_tensor = torch.cat([v.flatten(start_dim=1) for v in obs.values()], dim=-1)
             else:
                 obs_tensor = obs
+
+            # Inject observation noise for robustness stress-testing
+            if noise_generator is not None:
+                if isinstance(obs_tensor, torch.Tensor):
+                    obs_tensor = obs_tensor + args_cli.noise_scale * torch.randn(
+                        obs_tensor.shape, device=obs_tensor.device, generator=noise_generator
+                    )
+                else:
+                    # TensorDict / dict: apply noise to each value independently
+                    for key in obs_tensor:
+                        val = obs_tensor[key]
+                        obs_tensor[key] = val + args_cli.noise_scale * torch.randn(
+                            val.shape, device=val.device, generator=noise_generator
+                        )
 
             # agent stepping
             actions = policy(obs_tensor)

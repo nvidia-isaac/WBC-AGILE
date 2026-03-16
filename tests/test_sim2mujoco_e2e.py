@@ -107,6 +107,76 @@ class TestSim2MuJoCo(unittest.TestCase):
         """Test G1 velocity policy with history in Sim2MuJoCo."""
         self._run_eval(self.g1_hist_ckpt, self.g1_hist_cfg, self.g1_hist_mjcf, "G1 Velocity History")
 
+    def test_g1_velocity_height_save_data_headless(self):
+        """Test that --save-data with --no-viewer logs commands (headless command persistence)."""
+        self._run_eval_with_save_data(
+            self.g1_ckpt, self.g1_cfg, self.g1_mjcf, "G1 Velocity Height (save-data headless)"
+        )
+
+    def _run_eval_with_save_data(self, ckpt, cfg, mjcf, name):
+        """Run eval with --save-data and --no-viewer, verify parquet has command columns."""
+        if not os.path.exists(ckpt):
+            self.skipTest(f"Checkpoint not found at {ckpt}")
+        if not os.path.exists(mjcf):
+            self.fail(f"MJCF file not found at {mjcf}")
+
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            isaaclab_path = os.environ.get("ISAACLAB_PATH")
+            if isaaclab_path and os.path.exists(os.path.join(isaaclab_path, "isaaclab.sh")):
+                cmd = [
+                    os.path.join(isaaclab_path, "isaaclab.sh"),
+                    "-p",
+                    self.eval_script,
+                    "--checkpoint",
+                    ckpt,
+                    "--config",
+                    cfg,
+                    "--mjcf",
+                    mjcf,
+                    "--duration",
+                    "1.0",
+                    "--no-viewer",
+                    "--disable-keyboard",
+                    "--device",
+                    "cpu",
+                    "--save-data",
+                    "--output-dir",
+                    tmpdir,
+                ]
+            else:
+                cmd = [
+                    "python",
+                    self.eval_script,
+                    "--checkpoint",
+                    ckpt,
+                    "--config",
+                    cfg,
+                    "--mjcf",
+                    mjcf,
+                    "--duration",
+                    "1.0",
+                    "--no-viewer",
+                    "--disable-keyboard",
+                    "--device",
+                    "cpu",
+                    "--save-data",
+                    "--output-dir",
+                    tmpdir,
+                ]
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=60, env=os.environ)
+            self.assertEqual(result.returncode, 0, f"Command failed: {result.stderr}")
+
+            traj_dir = os.path.join(tmpdir, "trajectories")
+            parquet_files = list(Path(traj_dir).glob("episode_*.parquet"))
+            self.assertGreater(len(parquet_files), 0, "No parquet files produced")
+            import pandas as pd
+
+            df = pd.read_parquet(parquet_files[0])
+            self.assertIn("commands_0", df.columns, "commands_0 missing (headless should log commands)")
+            self.assertIn("commands_3", df.columns, "velocity_height policy should have commands_3 (height)")
+
     def _run_eval(self, ckpt, cfg, mjcf, name):
         """Helper to run the evaluation script."""
         # Skip if checkpoint doesn't exist

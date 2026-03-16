@@ -152,6 +152,7 @@ echo -e "${BLUE}========================================${NC}"
 TEST_DIRS=(
     "$PROJECT_ROOT/agile/rl_env/tests"
     "$PROJECT_ROOT/agile/algorithms/evaluation/tests"
+    "$PROJECT_ROOT/agile/sim2mujoco/tests"
 )
 
 # Initialize counters

@@ -48,6 +48,7 @@ class PolicyEvaluator:
         save_trajectories: bool = False,
         trajectory_fields: list[str] | None = None,
         joint_group_config: dict | None = None,
+        provenance: dict | None = None,
     ):
         """Initialize a policy evaluator.
 
@@ -65,6 +66,9 @@ class PolicyEvaluator:
                               Format: {"upper_body": ["joint1", ".*_shoulder_.*", ...], ...}
                               Each value is a list of joint names/patterns supporting wildcards.
                               If None, all joints go to "default" group.
+            provenance: Optional dict recording how this evaluation was produced
+                       (checkpoint path, task name, eval config, CLI args, etc.).
+                       Saved into trajectory metadata.json for reproducibility.
         """
         self._env = env.unwrapped if hasattr(env, "unwrapped") else env
         self._num_envs = self._env.num_envs
@@ -102,9 +106,10 @@ class PolicyEvaluator:
             self._trajectory_logger = TrajectoryLogger(
                 output_dir=self._metrics_path,
                 physics_dt=control_dt,
-                env=self._env,  # Pass environment for metadata extraction
+                env=self._env,
                 fields_to_save=trajectory_fields,
-                joint_groups=self._joint_groups,  # Pass joint groups for metadata
+                joint_groups=self._joint_groups,
+                provenance=provenance,
                 verbose=verbose,
             )
 

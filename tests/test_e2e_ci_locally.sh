@@ -206,6 +206,8 @@ EOF
             echo 'Testing all task environments...'
             \${ISAACLAB_PATH}/isaaclab.sh -p tests/test_all_tasks_e2e.py
             \${ISAACLAB_PATH}/isaaclab.sh -p tests/test_deterministic_eval_e2e.py
+            echo 'Testing IO descriptor export...'
+            \${ISAACLAB_PATH}/isaaclab.sh -p tests/test_export_io_descriptors_e2e.py
             echo 'Testing Sim2MuJoCo pipeline...'
             \${ISAACLAB_PATH}/isaaclab.sh -p tests/test_sim2mujoco_e2e.py
         "

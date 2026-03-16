@@ -14,7 +14,7 @@
 # limitations under the License.
 
 
-"""Script to an environment with random action agent."""
+"""Export IO descriptor YAML for sim2mujoco evaluation."""
 
 """Launch Isaac Sim Simulator first."""
 
@@ -127,6 +127,51 @@ def export_motion_tracking_data(env):
     return None
 
 
+def _inject_noise_config(env, outs: dict) -> None:
+    """Extract per-term noise config from the observation manager into the export dict.
+
+    Isaac Lab's ``get_IO_descriptors`` deliberately omits noise.  This function
+    reads the noise config from each ``ObsTerm`` and attaches it to the
+    corresponding entry in ``outs["observations"]``.
+    """
+    from isaaclab.utils.noise import noise_cfg as noise_cfg_mod
+
+    obs_mgr = getattr(env, "observation_manager", None)
+    if obs_mgr is None:
+        return
+
+    for group_name in obs_mgr._group_obs_term_names:
+        if group_name not in outs.get("observations", {}):
+            continue
+        term_names = obs_mgr._group_obs_term_names[group_name]
+        term_cfgs = obs_mgr._group_obs_term_cfgs[group_name]
+        exported_terms = outs["observations"][group_name]
+
+        name_to_export = {t["name"]: t for t in exported_terms}
+        for term_name, term_cfg in zip(term_names, term_cfgs, strict=False):
+            ncfg = getattr(term_cfg, "noise", None)
+            if ncfg is None or term_name not in name_to_export:
+                continue
+
+            noise_dict = None
+            if isinstance(ncfg, noise_cfg_mod.UniformNoiseCfg):
+                noise_dict = {
+                    "type": "uniform",
+                    "n_min": float(ncfg.n_min) if not isinstance(ncfg.n_min, torch.Tensor) else ncfg.n_min.tolist(),
+                    "n_max": float(ncfg.n_max) if not isinstance(ncfg.n_max, torch.Tensor) else ncfg.n_max.tolist(),
+                }
+            elif isinstance(ncfg, noise_cfg_mod.GaussianNoiseCfg):
+                noise_dict = {
+                    "type": "gaussian",
+                    "mean": float(ncfg.mean) if not isinstance(ncfg.mean, torch.Tensor) else ncfg.mean.tolist(),
+                    "std": float(ncfg.std) if not isinstance(ncfg.std, torch.Tensor) else ncfg.std.tolist(),
+                }
+
+            if noise_dict is not None:
+                name_to_export[term_name]["noise"] = noise_dict
+                print(f"[INFO]: Exported noise for '{term_name}': {noise_dict}")
+
+
 def main():
     """Random actions agent with Isaac Lab environment."""
     # create environment configuration
@@ -166,6 +211,16 @@ def main():
     motion_tracking = export_motion_tracking_data(env.unwrapped)
     if motion_tracking is not None:
         outs["motion_tracking"] = motion_tracking
+
+    # Inject per-term noise config from the observation manager (not exported by IsaacLab).
+    _inject_noise_config(env.unwrapped, outs)
+
+    # Supplement articulation data with soft joint velocity limits
+    # (not exported by IsaacLab's export_articulations_data).
+    for name, art in env.unwrapped.scene.articulations.items():
+        vel_limits = art.data.soft_joint_vel_limits
+        if vel_limits is not None and name in outs["articulations"]:
+            outs["articulations"][name]["soft_joint_vel_limits"] = vel_limits[0].detach().cpu().tolist()
 
     # Convert all data to be YAML-serializable
     outs_serializable = convert_to_serializable(outs)

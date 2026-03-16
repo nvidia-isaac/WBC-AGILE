@@ -73,7 +73,7 @@ class DummyViewer:
     def sync(self):
         pass
 
-    def is_running(self):
+    def is_running(self) -> bool:
         return True
 
 
@@ -188,6 +188,7 @@ class MuJocoSimulation:
         else:
             self.viewer = DummyViewer()
             self.viewer.__enter__()
+            self.paused = False
 
         # Setup anchor body tracking for motion tracking tasks.
         motion_tracking = config.get("motion_tracking")

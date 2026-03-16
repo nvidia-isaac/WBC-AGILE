@@ -97,7 +97,7 @@ class HistoryBuffer:
 
 
 class ObservationTerm:
-    """Single observation term with history support."""
+    """Single observation term with history support and optional noise injection."""
 
     def __init__(self, name: str, config: dict, joint_names: list[str], device: torch.device):
         """
@@ -119,6 +119,14 @@ class ObservationTerm:
         self.flatten_history = overloads.get("flatten_history_dim", True)
         self.clip = overloads.get("clip", None)
         self.scale = overloads.get("scale", None)
+
+        # Parse noise config (optional).
+        noise_cfg = config.get("noise")
+        self.noise_type: str | None = None
+        self.noise_params: dict = {}
+        if noise_cfg and isinstance(noise_cfg, dict):
+            self.noise_type = noise_cfg.get("type")
+            self.noise_params = noise_cfg
 
         # Determine observation dimension.
         self.obs_dim = self._compute_obs_dim(config)
@@ -161,38 +169,62 @@ class ObservationTerm:
             return shape[0] if len(shape) == 1 else int(torch.prod(torch.tensor(shape)).item())
         return shape
 
-    def compute(self, sim_state) -> torch.Tensor:
-        """
-        Compute observation with history, scaling, and clipping.
+    def compute(self, sim_state, noise_scale: float = 0.0) -> torch.Tensor:
+        """Compute observation with noise, clipping, scaling, and history.
+
+        Processing order matches Isaac Lab's observation_manager:
+        raw → noise → clip → scale → history.
 
         Args:
             sim_state: Current simulation state.
+            noise_scale: Global multiplier for noise amplitude (0 = off).
 
         Returns:
             Tensor of shape (obs_dim,) if history_length == 0.
             Tensor of shape (history_length * obs_dim,) if history_length > 0.
         """
-        # Compute raw observation.
-        raw_obs = self.compute_raw_fn(sim_state)
+        obs = self.compute_raw_fn(sim_state)
 
-        # Apply scaling.
+        if self.noise_type is not None and noise_scale > 0:
+            obs = self._apply_noise(obs, noise_scale)
+
+        if self.clip is not None:
+            obs = torch.clamp(obs, self.clip[0], self.clip[1])
+
         if self.scale is not None:
             if isinstance(self.scale, list):
                 scale_tensor = torch.tensor(self.scale, device=self.device, dtype=torch.float32)
-                raw_obs = raw_obs * scale_tensor
+                obs = obs * scale_tensor
             else:
-                raw_obs = raw_obs * self.scale
+                obs = obs * self.scale
 
-        # Apply clipping.
-        if self.clip is not None:
-            raw_obs = torch.clamp(raw_obs, self.clip[0], self.clip[1])
-
-        # Handle history.
         if self.history_length == 0:
-            return raw_obs
+            return obs
         else:
-            self.history.push(raw_obs)
+            self.history.push(obs)
             return self.history.get(flatten=self.flatten_history)
+
+    def _apply_noise(self, obs: torch.Tensor, scale: float) -> torch.Tensor:
+        """Add additive noise to an observation tensor.
+
+        Args:
+            obs: Raw observation.
+            scale: Global multiplier applied to the noise amplitude.
+
+        Returns:
+            Observation with additive noise.
+        """
+        if self.noise_type == "uniform":
+            n_min = float(self.noise_params.get("n_min", -1.0)) * scale
+            n_max = float(self.noise_params.get("n_max", 1.0)) * scale
+            noise = torch.empty_like(obs).uniform_(n_min, n_max)
+        elif self.noise_type == "gaussian":
+            mean = float(self.noise_params.get("mean", 0.0))
+            std = float(self.noise_params.get("std", 1.0)) * scale
+            noise = torch.normal(mean, std, size=obs.shape, device=obs.device, dtype=obs.dtype)
+        else:
+            return obs
+        return obs + noise
 
     def reset(self):
         """Reset history buffer."""
@@ -557,19 +589,19 @@ class ObservationProcessor:
     # Main compute / lifecycle
     # ------------------------------------------------------------------
 
-    def compute(self, sim_state) -> torch.Tensor:
-        """
-        Compute full observation vector.
+    def compute(self, sim_state, noise_scale: float = 0.0) -> torch.Tensor:
+        """Compute full observation vector.
 
         Args:
             sim_state: Current simulation state.
+            noise_scale: Global multiplier for observation noise (0 = off).
 
         Returns:
             Concatenated observation tensor of shape (total_obs_dim,).
         """
         obs_list = []
         for term in self.terms:
-            obs = term.compute(sim_state)
+            obs = term.compute(sim_state, noise_scale=noise_scale)
             obs_list.append(obs.flatten())
 
         return torch.cat(obs_list, dim=0)

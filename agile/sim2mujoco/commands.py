@@ -66,7 +66,16 @@ class CommandManager:
         self.linear_x_range = (-0.5, 0.5)
         self.linear_y_range = (-0.5, 0.5)
         self.angular_z_range = (-1.0, 1.0)
-        self.height_range = (0.3, 0.8)
+        self.height_range = (0.4, 0.72)
+
+    def get_defaults(self) -> dict[str, float]:
+        """Return default command values as a dictionary."""
+        return {
+            "linear_x": self._default_linear_x,
+            "linear_y": self._default_linear_y,
+            "angular_z": self._default_angular_z,
+            "height": self._default_height,
+        }
 
     def _clamp(self, value: float, min_val: float, max_val: float) -> float:
         """Clamp value to range."""
@@ -91,6 +100,28 @@ class CommandManager:
         """Increment/decrement target height."""
         with self._lock:
             self._height = self._clamp(self._height + delta, *self.height_range)
+
+    def set_command(
+        self,
+        linear_x: float,
+        linear_y: float,
+        angular_z: float,
+        height: float | None = None,
+    ) -> None:
+        """Set command values programmatically (for scripted evaluation from YAML).
+
+        Args:
+            linear_x: Forward/backward velocity (m/s).
+            linear_y: Lateral velocity (m/s).
+            angular_z: Yaw rate (rad/s).
+            height: Target height (m). If None, leaves current height unchanged.
+        """
+        with self._lock:
+            self._linear_x = self._clamp(linear_x, *self.linear_x_range)
+            self._linear_y = self._clamp(linear_y, *self.linear_y_range)
+            self._angular_z = self._clamp(angular_z, *self.angular_z_range)
+            if height is not None:
+                self._height = self._clamp(height, *self.height_range)
 
     def stop(self):
         """Reset all commands to default values (STOP button)."""

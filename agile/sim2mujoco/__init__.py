@@ -20,7 +20,10 @@ A lightweight, self-contained module for evaluating RL policies in MuJoCo simula
 """
 
 from .actions import ActionProcessor
+from .command_provider import CommandProvider, MotionCommandProvider, VelocityCommandProvider, create_command_provider
+from .command_scheduler import Sim2MuJoCoCommandScheduler
 from .commands import CommandManager
+from .data_logger import Sim2MuJoCoDataLogger
 from .observations import ObservationProcessor
 from .policy import PolicyWrapper
 from .simulation import JointCommand, MuJocoSimulation, SimState
@@ -36,6 +39,12 @@ __all__ = [
     "ObservationProcessor",
     "ActionProcessor",
     "CommandManager",
+    "CommandProvider",
+    "VelocityCommandProvider",
+    "MotionCommandProvider",
+    "create_command_provider",
+    "Sim2MuJoCoCommandScheduler",
+    "Sim2MuJoCoDataLogger",
     "load_config",
     "default_device",
 ]

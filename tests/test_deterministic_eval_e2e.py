@@ -27,6 +27,8 @@ Tests the complete flow:
 This test ensures the evaluation scenario system works correctly in CI.
 """
 
+from __future__ import annotations
+
 import json
 import os
 import subprocess
@@ -39,6 +41,8 @@ import pandas as pd
 
 class TestDeterministicEvalE2E(unittest.TestCase):
     """End-to-end test for deterministic evaluation system."""
+
+    DEFAULT_EVAL_TIMEOUT_S = 1200
 
     @classmethod
     def setUpClass(cls):
@@ -110,11 +114,40 @@ class TestDeterministicEvalE2E(unittest.TestCase):
             self._validate_episode_length(log_dir)
             self._validate_deterministic_commands(log_dir)
             self._validate_metrics(log_dir)
+            self._validate_provenance_metadata(log_dir)
 
             # Phase 3: Generate and validate report
             self._generate_and_validate_report(log_dir)
 
             print("[TEST] All validations passed!")
+
+    def test_random_commands_and_noise(self):
+        """Test random command scheduling and observation noise injection.
+
+        Runs eval with --random_commands and --noise_scale, then validates:
+        - Evaluation completes successfully
+        - Commands vary across time (not constant like deterministic mode)
+        - Provenance metadata records noise and random-command settings
+        - Metrics are valid
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmpdir = Path(tmpdir)
+            print(f"\n[TEST] Using temporary directory: {tmpdir}")
+
+            # Phase 1: Run evaluation with random commands + noise
+            log_dir = self._run_evaluation_with_random_commands_and_noise(tmpdir)
+
+            # Phase 2: Validate
+            self._validate_trajectory_structure(log_dir)
+            self._validate_random_commands(log_dir)
+            self._validate_provenance_metadata(
+                log_dir,
+                expect_noise_scale=0.1,
+                expect_random_commands=["all"],
+            )
+            self._validate_metrics(log_dir)
+
+            print("[TEST] Random commands + noise validations passed!")
 
     def _run_evaluation(self, tmpdir: Path) -> Path:
         """Run eval.py with deterministic config in headless mode.
@@ -203,6 +236,95 @@ class TestDeterministicEvalE2E(unittest.TestCase):
 
         print(f"[TEST] Log directory: {log_dir}")
 
+        return log_dir
+
+    def _run_evaluation_with_random_commands_and_noise(self, tmpdir: Path) -> Path:
+        """Run eval.py with random command scheduling and observation noise.
+
+        Args:
+            tmpdir: Temporary directory for logs
+
+        Returns:
+            Path to log directory
+        """
+        print("\n[TEST] Phase 1: Running evaluation with random commands + noise...")
+
+        metrics_file = tmpdir / "metrics.json"
+
+        isaaclab_script = Path(self.isaaclab_path) / "isaaclab.sh"
+        cmd = [
+            str(isaaclab_script),
+            "-p",
+            str(self.eval_script),
+            "--task",
+            "Velocity-Height-G1-v0",
+            "--checkpoint",
+            str(self.checkpoint),
+            # Use the eval config for its env overrides (short episode length,
+            # disabled events) — the --random_commands flag takes priority over
+            # the deterministic schedule in the config.
+            "--eval_config",
+            str(self.quick_config),
+            "--num_envs",
+            "2",
+            "--num_steps",
+            "400",
+            "--run_evaluation",
+            "--save_trajectories",
+            "--headless",
+            "--metrics_file",
+            str(metrics_file),
+            # Random command scheduling — short interval so commands change even in
+            # brief episodes where the robot falls quickly under noise.
+            "--random_commands",
+            "all",
+            "--random_interval",
+            "0.2",
+            "--random_seed",
+            "42",
+            # Observation noise
+            "--noise_scale",
+            "0.1",
+            "--noise_seed",
+            "42",
+        ]
+
+        env = os.environ.copy()
+        env["ISAACLAB_HEADLESS"] = "1"
+
+        print(f"[TEST] Command: {' '.join(cmd)}")
+
+        timeout_s = int(os.environ.get("DETERMINISTIC_EVAL_TIMEOUT_S", self.DEFAULT_EVAL_TIMEOUT_S))
+        try:
+            result = subprocess.run(
+                cmd,
+                env=env,
+                timeout=timeout_s,
+                capture_output=True,
+                text=True,
+                cwd=str(self.project_root),
+            )
+        except subprocess.TimeoutExpired as e:
+            stdout = (e.stdout or "").strip()
+            stderr = (e.stderr or "").strip()
+            if stdout:
+                print(f"[TEST] Partial STDOUT before timeout:\n{stdout[-8000:]}")
+            if stderr:
+                print(f"[TEST] Partial STDERR before timeout:\n{stderr[-8000:]}")
+            self.fail(
+                f"Evaluation timed out after {timeout_s} seconds. "
+                "Set DETERMINISTIC_EVAL_TIMEOUT_S to override for slower runners."
+            )
+
+        if result.returncode != 0:
+            print(f"[TEST] STDOUT:\n{result.stdout}")
+            print(f"[TEST] STDERR:\n{result.stderr}")
+            self.fail(f"Evaluation with random commands + noise failed with return code {result.returncode}")
+
+        log_dir = metrics_file.parent
+        self.assertTrue(metrics_file.exists(), f"Metrics file not created: {metrics_file}")
+
+        print(f"[TEST] Log directory: {log_dir}")
         return log_dir
 
     def _validate_trajectory_structure(self, log_dir: Path):
@@ -488,6 +610,132 @@ class TestDeterministicEvalE2E(unittest.TestCase):
         self.assertLessEqual(success_rate, 1.0, "Success rate should be <= 1")
 
         print(f"[TEST] ✓ Success rate: {success_rate:.2%}")
+
+    def _validate_provenance_metadata(
+        self,
+        log_dir: Path,
+        expect_noise_scale: float | None = None,
+        expect_random_commands: list[str] | None = None,
+    ):
+        """Verify provenance metadata is present and well-formed in metadata.json.
+
+        Args:
+            log_dir: Evaluation log directory
+            expect_noise_scale: If set, assert provenance.noise_scale matches this value.
+            expect_random_commands: If set, assert provenance.random_commands matches this value.
+        """
+        print("\n[TEST] Validating provenance metadata...")
+
+        metadata_file = log_dir / "trajectories" / "metadata.json"
+        self.assertTrue(metadata_file.exists(), f"metadata.json not found at {metadata_file}")
+
+        with open(metadata_file) as f:
+            metadata = json.load(f)
+
+        self.assertIn("provenance", metadata, "metadata.json missing 'provenance' key")
+        provenance = metadata["provenance"]
+        self.assertIsInstance(provenance, dict, "provenance should be a dict")
+
+        # Core provenance fields that should always be present
+        required_keys = ["checkpoint", "task", "num_envs", "timestamp", "command_line"]
+        for key in required_keys:
+            self.assertIn(key, provenance, f"provenance missing required key: {key}")
+
+        self.assertIn("Velocity-Height-G1-v0", provenance["task"])
+        self.assertGreater(len(provenance["checkpoint"]), 0, "checkpoint path should not be empty")
+        self.assertGreater(len(provenance["timestamp"]), 0, "timestamp should not be empty")
+
+        # Validate noise settings if expected
+        if expect_noise_scale is not None:
+            self.assertIn("noise_scale", provenance, "provenance missing noise_scale")
+            self.assertAlmostEqual(
+                provenance["noise_scale"],
+                expect_noise_scale,
+                places=5,
+                msg=f"noise_scale mismatch: expected {expect_noise_scale}",
+            )
+            print(f"[TEST] ✓ noise_scale recorded: {provenance['noise_scale']}")
+
+        # Validate random command settings if expected
+        if expect_random_commands is not None:
+            self.assertIn("random_commands", provenance, "provenance missing random_commands")
+            self.assertEqual(
+                provenance["random_commands"],
+                expect_random_commands,
+                f"random_commands mismatch: expected {expect_random_commands}",
+            )
+            print(f"[TEST] ✓ random_commands recorded: {provenance['random_commands']}")
+
+        print(f"[TEST] ✓ Provenance metadata valid with keys: {sorted(provenance.keys())}")
+
+    def _validate_random_commands(self, log_dir: Path):
+        """Verify that random command scheduling produced varying commands.
+
+        With random commands and a short resample interval, we check two things:
+        1. Within-episode variation: at least one episode shows command changes
+           (requires episode length > resample interval).
+        2. Across-episode variation: different episodes receive different commands
+           even if individual episodes are too short for within-episode changes
+           (the RNG advances between episodes).
+
+        Either condition passing is sufficient to confirm the scheduler is working.
+
+        Args:
+            log_dir: Evaluation log directory
+        """
+        print("\n[TEST] Validating random commands...")
+
+        traj_dir = log_dir / "trajectories"
+        parquet_files = sorted(traj_dir.glob("episode_*.parquet"))
+        self.assertGreater(len(parquet_files), 0, "No trajectory files found")
+
+        # Load all episodes and identify command columns
+        all_dfs = [pd.read_parquet(f) for f in parquet_files]
+        command_cols = [c for c in all_dfs[0].columns if c.startswith("commands_")]
+        self.assertGreater(len(command_cols), 0, "No command columns found in trajectory")
+
+        # --- Check 1: within-episode variation ---
+        within_varied = False
+        for i, df in enumerate(all_dfs):
+            for col in command_cols:
+                value_range = df[col].max() - df[col].min()
+                if value_range > 0.01:
+                    within_varied = True
+                    print(
+                        f"[TEST]   Episode {i} within-episode {col}: "
+                        f"range={value_range:.3f} (min={df[col].min():.3f}, max={df[col].max():.3f})"
+                    )
+
+        if within_varied:
+            print("[TEST] ✓ Within-episode command variation detected")
+        else:
+            print("[TEST]   No within-episode variation (episodes may be shorter than resample interval)")
+
+        # --- Check 2: across-episode variation ---
+        across_varied = False
+        if len(all_dfs) >= 2:
+            for col in command_cols:
+                episode_means = [df[col].mean() for df in all_dfs]
+                cross_range = max(episode_means) - min(episode_means)
+                if cross_range > 0.01:
+                    across_varied = True
+                    means_str = ", ".join(f"{m:.3f}" for m in episode_means)
+                    print(f"[TEST]   Across-episode {col}: means=[{means_str}], range={cross_range:.3f}")
+
+        if across_varied:
+            print("[TEST] ✓ Across-episode command variation detected")
+        else:
+            print("[TEST]   No across-episode variation detected")
+
+        # At least one type of variation must be present
+        self.assertTrue(
+            within_varied or across_varied,
+            "Random command scheduling produced identical constant commands in ALL episodes. "
+            f"Checked {len(all_dfs)} episodes across {len(command_cols)} command dimensions. "
+            "Expected either within-episode or across-episode variation.",
+        )
+
+        print("[TEST] ✓ Random commands validated successfully")
 
     def _generate_and_validate_report(self, log_dir: Path):
         """Generate HTML report and verify structure.

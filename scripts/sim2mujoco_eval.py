@@ -37,6 +37,22 @@ Examples:
         --mjcf agile/rl_env/assets/robot_menagerie/unitree/g1/mujoco/scene_29dof.xml \
         --eval-config agile/sim2mujoco/configs/x_velocity_sweep.yaml \
         --save-data --no-viewer
+
+    # Random commands (randomize only vx, for comparison with deterministic sweep):
+    python scripts/sim2mujoco_eval.py \
+        --checkpoint agile/data/policy/velocity_height_g1/unitree_g1_velocity_height_teacher.pt \
+        --config agile/data/policy/velocity_height_g1/unitree_g1_velocity_height_teacher.yaml \
+        --mjcf agile/rl_env/assets/robot_menagerie/unitree/g1/mujoco/scene_29dof.xml \
+        --random-commands vx --random-interval 2.0 --random-seed 42 \
+        --duration 50.0 --save-data --no-viewer
+
+    # Random commands (randomize all dimensions):
+    python scripts/sim2mujoco_eval.py \
+        --checkpoint agile/data/policy/velocity_height_g1/unitree_g1_velocity_height_recurrent_student.pt \
+        --config agile/data/policy/velocity_height_g1/unitree_g1_velocity_height_recurrent_student.yaml \
+        --mjcf agile/rl_env/assets/robot_menagerie/unitree/g1/mujoco/scene_29dof.xml \
+        --random-commands all --random-interval 2.0 --random-seed 0 \
+        --duration 50.0 --save-data --no-viewer
 """
 
 import argparse
@@ -48,8 +64,8 @@ from pathlib import Path
 import torch
 
 from agile.sim2mujoco.actions import ActionProcessor
-from agile.sim2mujoco.commands import CommandManager
-from agile.sim2mujoco.data_logger import Sim2MuJoCoDataLogger, get_command_info
+from agile.sim2mujoco.command_provider import VelocityCommandProvider, create_command_provider
+from agile.sim2mujoco.data_logger import Sim2MuJoCoDataLogger
 from agile.sim2mujoco.observations import ObservationProcessor
 from agile.sim2mujoco.policy import PolicyWrapper
 from agile.sim2mujoco.simulation import MuJocoSimulation
@@ -81,8 +97,41 @@ def main():
     )
     parser.add_argument("--save-data", action="store_true", help="Save evaluation data to disk")
     parser.add_argument("--output-dir", type=Path, default=None, help="Output directory for saved data")
+    parser.add_argument(
+        "--noise-scale",
+        type=float,
+        default=0.0,
+        help="Scale factor for observation noise (0=off, 1=match training, >1=stress test)",
+    )
+    parser.add_argument("--noise-seed", type=int, default=None, help="Random seed for reproducible observation noise")
+    parser.add_argument(
+        "--random-commands",
+        type=str,
+        nargs="+",
+        default=None,
+        metavar="FIELD",
+        help="Randomize commands uniformly (resample every --random-interval seconds). "
+        "Fields: vx, vy, wz, height, or 'all'. Non-listed fields stay at defaults. "
+        "Mutually exclusive with --eval-config. "
+        "Example: --random-commands vx  (only forward velocity randomized)",
+    )
+    parser.add_argument(
+        "--random-interval",
+        type=float,
+        default=2.0,
+        help="Seconds between random command resamples (default: 2.0)",
+    )
+    parser.add_argument(
+        "--random-seed",
+        type=int,
+        default=None,
+        help="RNG seed for reproducible random commands (default: non-deterministic)",
+    )
 
     args = parser.parse_args()
+
+    if args.random_commands and args.eval_config:
+        parser.error("--random-commands and --eval-config are mutually exclusive")
 
     # Setup device.
     if args.device == "auto":
@@ -91,6 +140,13 @@ def main():
         device = torch.device(args.device)
 
     print(f"Using device: {device}")
+
+    # Setup noise seed for reproducibility.
+    if args.noise_seed is not None:
+        torch.manual_seed(args.noise_seed)
+    if args.noise_scale > 0:
+        seed_info = f", seed={args.noise_seed}" if args.noise_seed is not None else ""
+        print(f"Observation noise: scale={args.noise_scale}{seed_info}")
 
     # Load config.
     print(f"\nLoading config from {args.config}...")
@@ -106,9 +162,6 @@ def main():
         robot_config = config["articulations"]["robot"]
         robot_config["default_joint_stiffness"] = [kp * args.pd_scale for kp in robot_config["default_joint_stiffness"]]
         robot_config["default_joint_damping"] = [kd * args.pd_scale for kd in robot_config["default_joint_damping"]]
-
-    # Detect command terms from config (needed for obs and logging).
-    _, _, command_dim, _ = get_command_info(config)
 
     # Load eval config if provided (YAML-defined command schedule).
     eval_config = None
@@ -136,60 +189,71 @@ def main():
         args.duration = eval_config.episode_length_s
         print(f"\n✓ Loaded eval config from {args.eval_config} (duration={args.duration}s)")
 
-    # Create command manager when policy has command terms (for obs and logging).
-    # Keyboard control only active when viewer is enabled and keyboard not disabled.
-    # When eval_config is used, scheduler overrides commands so keyboard is effectively disabled.
-    command_manager = None
-    if command_dim > 0:
-        command_manager = CommandManager(
-            device=device, defaults={"linear_x": 0.0, "linear_y": 0.0, "angular_z": 0.0, "height": 0.72}
-        )
-        if eval_config is not None:
-            print("\n✓ Eval config active (command schedule from YAML)")
-        elif not args.disable_keyboard and not args.no_viewer:
-            print("\n✓ Keyboard control enabled")
-        else:
-            print("\n✓ Keyboard control disabled (command manager active for default commands)")
-    else:
-        print("\n✓ No command terms in policy")
-
-    # Create command scheduler when eval config is used.
-    command_scheduler = None
-    if eval_config is not None and command_manager is not None:
-        from agile.sim2mujoco.command_scheduler import Sim2MuJoCoCommandScheduler
-
-        command_scheduler = Sim2MuJoCoCommandScheduler(
-            eval_config=eval_config,
-            command_manager=command_manager,
-            duration=args.duration,
-            command_dim=command_dim,
-            verbose=args.verbose,
-        )
-
     # Load policy.
     print(f"\nLoading policy from {args.checkpoint}...")
     policy = PolicyWrapper.from_config(args.checkpoint, config, device)
     print(f"  Policy type: {type(policy).__name__}")
 
-    # Create simulation.
+    # Create simulation (command_manager will be attached after provider creation).
     print("\nCreating simulation...")
-    sim = MuJocoSimulation(
-        config, device, enable_viewer=not args.no_viewer, mjcf_path=args.mjcf, command_manager=command_manager
-    )
+    sim = MuJocoSimulation(config, device, enable_viewer=not args.no_viewer, mjcf_path=args.mjcf)
     print(f"  Num joints: {sim.num_joints}")
     print(f"  Fixed base: {sim.fixed_base}")
     print(f"  Physics dt: {sim.physics_dt}s ({1.0 / sim.physics_dt:.0f} Hz)")
     print(f"  Control dt: {sim.dt}s ({1.0 / sim.dt:.1f} Hz)")
     print(f"  Decimation: {sim.decimation}")
 
-    # Create processors.
+    # Create observation processor first — it builds the MotionTracker if needed.
     print("\nSetting up observation processor...")
-    obs_processor = ObservationProcessor(config, sim.joint_names, device, command_manager=command_manager)
+    obs_processor = ObservationProcessor(config, sim.joint_names, device)
     print(f"  Total observation dim: {obs_processor.total_obs_dim}")
     print("  Observation terms:")
     for term in obs_processor.terms:
         hist_info = f" (history={term.history_length})" if term.history_length > 0 else ""
-        print(f"    - {term.name}: {term.output_dim()}{hist_info}")
+        noise_info = f" (noise={term.noise_type})" if term.noise_type else ""
+        print(f"    - {term.name}: {term.output_dim()}{hist_info}{noise_info}")
+
+    # Create the unified command provider (factory decides velocity vs motion tracking).
+    command_provider = create_command_provider(config, device, motion_tracker=obs_processor.motion_tracker)
+
+    # Wire up CommandManager-based features (keyboard, scheduler) for velocity providers.
+    command_manager = None
+    command_scheduler = None
+    if isinstance(command_provider, VelocityCommandProvider):
+        command_manager = command_provider.manager
+        sim.command_manager = command_manager
+        obs_processor.command_manager = command_manager
+
+        if eval_config is not None:
+            from agile.sim2mujoco.command_scheduler import Sim2MuJoCoCommandScheduler
+
+            command_scheduler = Sim2MuJoCoCommandScheduler(
+                eval_config=eval_config,
+                command_manager=command_manager,
+                duration=args.duration,
+                command_dim=command_provider.command_dim,
+                verbose=args.verbose,
+            )
+            print("\n✓ Eval config active (command schedule from YAML)")
+        elif args.random_commands is not None:
+            from agile.sim2mujoco.command_scheduler import RandomCommandScheduler
+
+            command_scheduler = RandomCommandScheduler(
+                command_manager=command_manager,
+                randomize_fields=args.random_commands,
+                interval=args.random_interval,
+                seed=args.random_seed,
+                verbose=True,
+            )
+            print("\n✓ Random commands active")
+        elif not args.disable_keyboard and not args.no_viewer:
+            print("\n✓ Keyboard control enabled")
+        else:
+            print("\n✓ Keyboard control disabled (command manager active for default commands)")
+    elif command_provider is not None:
+        print(f"\n✓ Command provider: {command_provider.command_type} (dim={command_provider.command_dim})")
+    else:
+        print("\n✓ No command terms in policy")
 
     print("\nSetting up action processor...")
     act_processor = ActionProcessor(config, sim.joint_names, device)
@@ -214,6 +278,10 @@ def main():
                 task_name = eval_config.task_name
                 eval_stem = args.eval_config.stem
                 output_dir = Path("logs/sim2mujoco") / task_name / f"{eval_stem}_{timestamp}"
+            elif args.random_commands is not None:
+                fields_tag = "_".join(args.random_commands)
+                seed_tag = f"_s{args.random_seed}" if args.random_seed is not None else ""
+                output_dir = Path("logs/sim2mujoco") / f"random_{fields_tag}{seed_tag}_{timestamp}"
             else:
                 output_dir = Path("logs/sim2mujoco") / f"{args.config.stem}_{timestamp}"
 
@@ -221,8 +289,15 @@ def main():
             "checkpoint": str(args.checkpoint),
             "config": str(args.config),
             "eval_config": str(args.eval_config) if args.eval_config else None,
+            "random_commands": args.random_commands,
+            "random_interval": args.random_interval if args.random_commands else None,
+            "random_seed": args.random_seed if args.random_commands else None,
+            "noise_scale": args.noise_scale,
+            "noise_seed": args.noise_seed,
         }
-        data_logger = Sim2MuJoCoDataLogger(output_dir, config, sim.joint_names, sim.dt, provenance=provenance)
+        data_logger = Sim2MuJoCoDataLogger(
+            output_dir, config, sim.joint_names, sim.dt, provenance=provenance, command_provider=command_provider
+        )
 
     # Evaluation loop parameters.
     control_dt = sim.dt  # This is physics_dt * decimation
@@ -258,7 +333,7 @@ def main():
 
         for step in range(num_steps):
             # Wait while paused (viewer stays responsive).
-            was_paused = False
+            was_paused = sim.paused or sim.step_once
             while sim.paused and not sim.step_once:
                 was_paused = True
                 time.sleep(0.01)
@@ -276,7 +351,7 @@ def main():
 
             # Get observations.
             sim_state = sim.get_state()
-            obs = obs_processor.compute(sim_state)
+            obs = obs_processor.compute(sim_state, noise_scale=args.noise_scale)
 
             # Policy inference.
             with torch.no_grad():
@@ -291,6 +366,12 @@ def main():
             # Step simulation (decimation times).
             for _ in range(sim.decimation):
                 sim.step(joint_cmd)
+
+            # Record data for analysis.
+            if data_logger is not None:
+                post_state = sim.get_state()
+                commands = command_provider.get_commands() if command_provider is not None else None
+                data_logger.record_step(post_state, joint_cmd, actions, commands)
 
             # Sync viewer at target frame rate.
             now = time.time()
@@ -307,12 +388,6 @@ def main():
                 sleep_time = target_wall - time.time()
                 if sleep_time > 0:
                     time.sleep(sleep_time)
-
-            # Record data for saving (get fresh state AFTER simulation steps).
-            if data_logger is not None:
-                post_state = sim.get_state()
-                commands = command_manager.get_command() if command_manager is not None else None
-                data_logger.record_step(post_state, joint_cmd, actions, commands=commands)
 
             # Logging (get fresh state AFTER simulation steps).
             if args.verbose and total_steps % args.log_freq == 0:
