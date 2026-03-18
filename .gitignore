@@ -22,4 +22,6 @@ fallen_states_cache/
 .venv/
 uv.lock
 
+docs/build/
+
 CLAUDE.md

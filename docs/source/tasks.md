@@ -185,9 +185,9 @@ fallen_state_dataset_cfg = FallenStateDatasetCfg(
 
 <table align="center">
   <tr>
-    <td align="center"><img src="unitree_g1_teleop.gif" width="280"></td>
+    <td align="center"><img src="g1_apple_grasp_black_sort_bin_multi_objects_no_marker_reduced.gif" width="280"></td>
   </tr>
-  <tr><td align="center"><em>Unitree G1 – Teleoperation</em></td></tr>
+  <tr><td align="center"><em>Unitree G1 – Pick and Place</em></td></tr>
 </table>
 
 This task demonstrates a **modular policy architecture**: a pre-trained, frozen locomotion
@@ -236,6 +236,13 @@ and velocities from a reference trajectory.
 - **No recurrence or history**: Pure reactive MLP policy operating on a single frame.
 - **BeyondMimic actuator model**: Uses system-identified motor parameters with no actuator delay.
 - **Anchor-relative tracking**: Rewards track body poses relative to a torso anchor, plus global anchor position and orientation.
+
+```{note}
+Due to licensing constraints, we do not include the pre-trained tracking checkpoint or the
+reference motion data in this repository. To obtain motion reference data for the Unitree G1,
+see the [AMASS Retargeted for G1](https://huggingface.co/datasets/ember-lab-berkeley/AMASS_Retargeted_for_G1/tree/main)
+dataset on Hugging Face.
+```
 
 ### Debug
 
