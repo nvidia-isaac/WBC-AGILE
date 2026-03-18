@@ -52,6 +52,14 @@ dev = [
     "types-setuptools",
 ]
 
+[dependency-groups]
+docs = [
+    "sphinx>=8.0",
+    "nvidia-sphinx-theme",
+    "myst-parser",
+    "sphinx-design",
+]
+
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["agile*", "workflow*", "wandb*"]

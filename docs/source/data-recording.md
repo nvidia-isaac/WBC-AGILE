@@ -4,13 +4,28 @@ Record demonstration data from an RL specialist policy and use it to fine-tune a
 
 ## Overview
 
-```
-┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│  1. Record      │───▶│  2. Convert     │───▶│  3. Fine-tune   │───▶│  4. Evaluate    │
-│  (RL Policy)    │    │  (HDF5→LeRobot) │    │  (GR00T)        │    │  (Closed-loop)  │
-└─────────────────┘    └─────────────────┘    └─────────────────┘    └─────────────────┘
-     Isaac Lab              Python              Isaac-GR00T            Isaac Lab
-```
+::::{grid} 4
+:::{grid-item-card} Step 1: Record
+Run RL policy to collect demonstrations (HDF5).
+
+*AGILE*
+:::
+:::{grid-item-card} Step 2: Convert
+Transform HDF5 to LeRobot-compatible format.
+
+*AGILE*
+:::
+:::{grid-item-card} Step 3: Fine-tune
+Post-train GR00T on the converted dataset.
+
+*Isaac-GR00T*
+:::
+:::{grid-item-card} Step 4: Evaluate
+Closed-loop inference in simulation.
+
+*AGILE*
+:::
+::::
 
 ## Prerequisites
 
@@ -58,7 +73,7 @@ jupyter notebook scripts/data_recording/inspect_data.ipynb
 |------|-------------|
 | `data_recorder.py` | `MultiEnvDataRecorder` API |
 | `inspect_data.ipynb` | Visualization notebook |
-| `convert_to_gr00t.py` | HDF5 → LeRobot converter |
+| `convert_to_gr00t.py` | HDF5 to LeRobot converter |
 
 ---
 
@@ -74,9 +89,9 @@ python scripts/data_recording/convert_to_gr00t.py \
 ```
 
 This generates:
-- `meta/` — Dataset metadata (episodes.jsonl, info.json, tasks.jsonl)
-- `videos/` — MP4 videos from RGB observations
-- `data/` — Parquet files with states and actions
+- `meta/` -- Dataset metadata (episodes.jsonl, info.json, tasks.jsonl)
+- `videos/` -- MP4 videos from RGB observations
+- `data/` -- Parquet files with states and actions
 
 ---
 
@@ -84,33 +99,20 @@ This generates:
 
 Once the GR00T dataset is generated, configure the data modalities for GR00T model training. The modality configuration specifies which observation channels (state, video, actions) are used and how they map to the training pipeline. You can tune this to find the best-performing combination for your task.
 
-For the pick-place task, edit the `modality.json` file in the GR00T dataset directory as following:
+For the pick-place task, edit the `modality.json` file in the GR00T dataset directory:
+
 ```json
 {
   "state": {
-    "base_ang_vel": {
-      "start": 0,
-      "end": 3
-    },
-    "joint_pos": {
-      "start": 6,
-      "end": 23
-    },
-    "joint_vel": {
-      "start": 23,
-      "end": 38
-    }
+    "base_ang_vel": { "start": 0, "end": 3 },
+    "joint_pos": { "start": 6, "end": 23 },
+    "joint_vel": { "start": 23, "end": 38 }
   },
   "action": {
-    "action": {
-      "start": 0,
-      "end": 21
-    }
+    "action": { "start": 0, "end": 21 }
   },
   "video": {
-    "image": {
-      "original_key": "observation.images.image"
-    }
+    "image": { "original_key": "observation.images.image" }
   },
   "annotation": {
     "human.action.task_description": {}
@@ -118,64 +120,41 @@ For the pick-place task, edit the `modality.json` file in the GR00T dataset dire
 }
 ```
 
-Next, add a corresponding data config class to `gr00t/experiment/data_config.py` in the Isaac-GR00T repository. This class defines the data keys, transform pipeline, and observation/action horizons used during training. Below is an example for the G1 pick-place task:
+Next, add a corresponding data config class to `gr00t/experiment/data_config.py` in the Isaac-GR00T repository. This class defines the data keys, transform pipeline, and observation/action horizons used during training.
 
-<details>
-<summary>G1PPTrackingSimDataConfig (click to expand)</summary>
+:::{dropdown} G1PPTrackingSimDataConfig (example)
 
 ```python
 class G1PPTrackingSimDataConfig(BaseDataConfig):
-    """Data config for G1 pick-place simulation dataset.
+    """Data config for G1 pick-place simulation dataset."""
 
-    This config defines the modalities, transforms, and horizons for GR00T
-    post-training on data recorded from the G1 pick-place RL policy.
-    Images are captured from an ego camera, and proprioceptive states include
-    base angular velocity, upper body joint positions, and joint velocities.
-    Actions are absolute joint position targets.
-    """
-
-    video_keys = [
-        "video.image",
-    ]
-    state_keys = [
-        "state.base_ang_vel",
-        "state.joint_pos",
-        "state.joint_vel",
-    ]
-    action_keys = [
-        "action.action",
-    ]
+    video_keys = ["video.image"]
+    state_keys = ["state.base_ang_vel", "state.joint_pos", "state.joint_vel"]
+    action_keys = ["action.action"]
     language_keys = ["annotation.human.action.task_description"]
     observation_indices = [0]
     action_indices = list(range(16))
 
     def transform(self):
         transforms = [
-            # video transforms
             VideoToTensor(apply_to=self.video_keys),
             VideoCrop(apply_to=self.video_keys, scale=0.95),
             VideoResize(apply_to=self.video_keys, height=224, width=224, interpolation="linear"),
             VideoColorJitter(
-                apply_to=self.video_keys,
-                brightness=0.3,
-                contrast=0.4,
-                saturation=0.5,
-                hue=0.08,
+                apply_to=self.video_keys, brightness=0.3, contrast=0.4,
+                saturation=0.5, hue=0.08,
             ),
             VideoToNumpy(apply_to=self.video_keys),
-            # state transforms
             StateActionToTensor(apply_to=self.state_keys),
             StateActionTransform(
                 apply_to=self.state_keys,
                 normalization_modes={key: "min_max" for key in self.state_keys},
             ),
-            # action transforms
             StateActionToTensor(apply_to=self.action_keys),
             StateActionTransform(
                 apply_to=self.action_keys,
                 normalization_modes={key: "min_max" for key in self.action_keys},
             ),
-            # concat transforms
             ConcatTransform(
                 video_concat_order=self.video_keys,
                 state_concat_order=self.state_keys,
@@ -184,15 +163,13 @@ class G1PPTrackingSimDataConfig(BaseDataConfig):
             GR00TTransform(
                 state_horizon=len(self.observation_indices),
                 action_horizon=len(self.action_indices),
-                max_state_dim=64,
-                max_action_dim=64,
+                max_state_dim=64, max_action_dim=64,
             ),
         ]
-
         return ComposedModalityTransform(transforms=transforms)
 ```
 
-</details>
+:::
 
 Register in `DATA_CONFIG_MAP`:
 
@@ -216,13 +193,15 @@ python scripts/gr00t_finetune.py \
     --output-dir outputs/gr00t-pp-tracking
 ```
 
-> **Tip:** Increase `--max-steps` and add more data for better performance.
+```{tip}
+Increase `--max-steps` and add more data for better performance.
+```
 
 ---
 
 ## Step 5: Closed-Loop Evaluation
 
-### 5.1 Launch GR00T N1.5 Inference Server
+### Launch GR00T N1.5 Inference Server
 
 In the [Isaac-GR00T-N1.5](https://github.com/NVIDIA/Isaac-GR00T/tree/n1.5-release) repository:
 
@@ -236,7 +215,7 @@ python scripts/inference_service.py \
     --port 6666
 ```
 
-### 5.2 Run Simulation Client
+### Run Simulation Client
 
 In **this repository**, connect to the server and run closed-loop evaluation:
 
@@ -260,4 +239,6 @@ python scripts/record.py \
 | `--gr00t_task_description` | Language instruction for the task |
 | `--gr00t_action_horizon` | Steps to execute per action chunk |
 
-> **Note:** Use `--num_envs 1` for easier debugging. Increase for throughput testing.
+```{note}
+Use `--num_envs 1` for easier debugging. Increase for throughput testing.
+```
