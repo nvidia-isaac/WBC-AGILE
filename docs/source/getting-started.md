@@ -44,7 +44,7 @@ With the `agile_env` conda environment active:
 conda activate agile_env
 export ISAACLAB_PATH=/path/to/IsaacLab
 
-git clone <repository-url> agile && cd agile
+git clone git@github.com:nvidia-isaac/WBC-AGILE.git agile && cd agile
 git lfs pull
 
 # Install AGILE + dependencies into the Isaac Lab environment
