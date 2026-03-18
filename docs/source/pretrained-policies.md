@@ -23,7 +23,7 @@ policy/
 | `velocity_height_g1/unitree_g1_velocity_height_teacher.pt` | `Velocity-Height-G1-v0` | v_x, v_y, w_z | TorchScript | Privileged teacher |
 | `velocity_height_g1/unitree_g1_velocity_height_recurrent_student.pt` | `Velocity-Height-G1-Distillation-Recurrent-v0` | v_x, v_y, w_z, h | TorchScript | Recurrent LSTM student |
 | `velocity_height_g1/unitree_g1_velocity_height_recurrent_student_checkpoint.pt` | `Velocity-Height-G1-Distillation-Recurrent-v0` | v_x, v_y, w_z, h | State dict | Training checkpoint |
-| `velocity_t1/booster_t1_velocity_v0.pt` | `Velocity-T1-v0` | v_x, v_y, w_z, h | TorchScript | History-based |
+| `velocity_t1/booster_t1_velocity_v0.pt` | `Velocity-T1-v0` | v_x, v_y, w_z | TorchScript | History-based |
 
 ```{note}
 Root linear velocity is considered privileged information, as accurate estimation usually requires additional hardware during deployment. Only the velocity-height teacher policy accesses this information; all other policies are suitable for direct deployment on real robots. The velocity-height policies are tuned for improved command tracking performance. The teacher policy is also useful in simulation since it observes privileged linear velocity and performs better at velocity tracking.

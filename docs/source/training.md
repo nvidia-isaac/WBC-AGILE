@@ -57,28 +57,28 @@ The standard pipeline for sim-to-real: train a privileged teacher, then distill 
 ```bash
 # 1. Train the teacher (with privileged observations)
 python scripts/train.py \
-    --task Velocity-G1-Height-Teacher-v0 \
+    --task Velocity-Height-G1-v0 \
     --num_envs 4096 --headless --logger wandb
 
 # 2. Export the teacher
 python scripts/export_policy.py \
-    --task Velocity-G1-Height-Teacher-v0 \
+    --task Velocity-Height-G1-v0 \
     --checkpoint /path/to/teacher/model_30000.pt --headless
 
 # 3. Train the student (distills from exported teacher)
 python scripts/train.py \
-    --task Velocity-G1-Height-Student-v0 \
+    --task Velocity-Height-G1-Distillation-Recurrent-v0 \
     --num_envs 4096 --headless --logger wandb
 
 # 4. Evaluate and export the student
 python scripts/eval.py \
-    --task Velocity-G1-Height-Student-v0 \
+    --task Velocity-Height-G1-Distillation-Recurrent-v0 \
     --num_envs 32 \
     --checkpoint /path/to/student/model_5000.pt \
     --run_evaluation --save_trajectories --generate_report
 
 python scripts/export_policy.py \
-    --task Velocity-G1-Height-Student-v0 \
+    --task Velocity-Height-G1-Distillation-Recurrent-v0 \
     --checkpoint /path/to/student/model_5000.pt --headless
 ```
 

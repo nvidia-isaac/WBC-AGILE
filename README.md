@@ -115,6 +115,6 @@ If you use AGILE in your research, please cite:
   author       = {Zhao, Huihua and Cathomen, Rafael and Gulich, Lionel and Ongan, Efe Arda and Lin, Michael and Jain, Shalin and Liu, Wei and Kulkarni, Vishal and Pouya, Soha and Chang, Yan},
   year         = {2025},
   note         = {Version compatible with Isaac Lab 2.3; accessed 2025-11-19},
-  url          = {https://github.com/nvidia-isaac/WBC_AGILE/tree/main}
+  url          = {https://github.com/nvidia-isaac/WBC-AGILE/tree/main}
 }
 ```
