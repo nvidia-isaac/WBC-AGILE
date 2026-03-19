@@ -66,24 +66,44 @@ When `schedule="adaptive"`, the learning rate adjusts based on the KL divergence
 | `max_grad_norm` | Gradient clipping norm | 1.0 |
 | `value_loss_coef` | Value loss weight | 1.0 |
 
-### Timeout Bootstrapping
+### Termination Handling
 
-When an episode ends due to a time limit (not a true terminal state), the value estimate is bootstrapped into the reward to avoid biasing the value function:
+AGILE extends standard timeout bootstrapping with a configurable good/bad termination system that provides scale-invariant reward shaping at episode boundaries.
+
+**Timeout bootstrapping** (standard): When an episode ends due to a time limit, the value estimate is bootstrapped to avoid biasing the value function:
 
 ```python
 rewards += gamma * values * time_outs
 ```
 
+**Good/bad termination handling** (`agile/rl_env/termination_cfg.py`): Each termination term can be annotated with a type and sigma value via `DoneTermCfg`:
+
+```python
+from agile.rl_env.termination_cfg import DoneTermCfg as DoneTermEx
+
+# "bad" termination: bootstrap + subtract sigma (worse than continuing)
+no_height_progress = DoneTermEx(func=mdp.no_height_progress, termination_type="bad", sigma=1.0, ...)
+
+# "good" termination: bootstrap + add sigma (better than continuing)
+reached_goal = DoneTermEx(func=mdp.reached_goal, termination_type="good", sigma=2.0, ...)
+```
+
+For both good and bad terminations, the value is first bootstrapped (making the termination value-neutral like timeouts), then sigma is added or subtracted. Since sigma operates post-normalization, it is largely scale-invariant and requires less tuning across different reward scales. Environments already bootstrapped by the timeout handler are excluded.
+
+The `VecEnvWrapper` scans `DoneTermCfg` metadata at initialization and aggregates per-environment sigmas (max across fired terms) into `bad_termination_sigma` / `good_termination_sigma` tensors passed to PPO via the `infos` dict.
+
 ## Distillation Algorithm
 
-The distillation algorithm (`agile/algorithms/rsl_rl/rsl_rl/algorithms/distillation.py`) trains a student policy to mimic a pre-trained teacher policy through behavior cloning.
+The distillation algorithm (`agile/algorithms/rsl_rl/rsl_rl/algorithms/distillation.py`) trains a student policy to mimic a pre-trained teacher using DAgger-style on-policy distillation.
 
 ### How It Works
 
-1. At each step, both student and teacher produce actions from their respective observations
-2. The student sees limited observations (e.g., proprioception only); the teacher sees privileged observations (e.g., terrain height maps, true velocities)
+1. The **student** controls the robot in the environment, collecting on-policy rollouts
+2. At each step, both student and teacher produce actions from their respective observations -- the student sees limited observations (e.g., proprioception only), the teacher sees privileged observations (e.g., terrain height maps, true velocities)
 3. The loss is the MSE (or Huber) between student and teacher actions
 4. For recurrent students, gradients flow through `gradient_length` time steps via BPTT
+
+Since data is collected under the student's own state visitation (not replayed teacher trajectories), training naturally covers the states the student actually encounters during deployment, avoiding the distribution mismatch of pure behavior cloning.
 
 ### Key Parameters
 
@@ -183,11 +203,25 @@ Statistics are updated during training and frozen during evaluation. Controlled 
 
 Normalizes rewards to achieve approximately unit-variance returns. Uses EMA (exponential moving average) for variance tracking, which adapts to curriculum changes better than cumulative statistics.
 
-For returns `G = sum(gamma^t * r_t)`:
 ```
-normalized_reward = reward / (sigma * gamma_factor + eps)
+scale = sigma * gamma_factor * return_correction + eps
+normalized_reward = reward / scale
 ```
+
 where `gamma_factor = 1 / sqrt(1 - gamma^2)`.
+
+**Return-scale correction**: The i.i.d. formula underestimates return variance when rewards are temporally correlated (e.g., a fallen robot produces many consecutive low rewards). A correction factor is EMA-tracked from measured GAE return standard deviations once per rollout, using the product invariance `return_std * correction = K` for oscillation-free convergence.
+
+**Outlier clipping**: Rewards beyond `outlier_threshold` standard deviations from the running mean are clipped before updating statistics and in the normalized output. This prevents rare reward spikes from destabilizing the normalizer.
+
+Configuration via `RslRlRewardNormalizationCfg`:
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `decay` | 0.999 | EMA decay for reward variance (~693 steps half-life) |
+| `epsilon` | 1e-2 | Numerical stability |
+| `return_scale_decay` | 0.999 | EMA decay for return-scale correction (None to disable) |
+| `outlier_threshold` | 10.0 | Clip beyond this many std deviations (None to disable) |
 
 ## Rollout Storage
 

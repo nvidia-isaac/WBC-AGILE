@@ -266,7 +266,7 @@ Start with `num_envs: 1` to validate configs. Use longer episodes than training 
 Interactive HTML reports with tracking analysis and per-joint plots. Reports are generated
 by the Isaac Lab evaluation path. The Sim2MuJoCo path does not generate reports directly,
 but its Parquet output is compatible with the plotting API for custom analysis (see
-[Analyzing Trajectories](#analyzing-trajectories-python-jupyter) below).
+Analyzing Trajectories below).
 
 ### Generation
 
