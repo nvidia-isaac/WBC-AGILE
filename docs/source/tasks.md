@@ -241,7 +241,7 @@ and velocities from a reference trajectory.
 Due to licensing constraints, we do not include the pre-trained tracking checkpoint or the
 reference motion data in this repository. To obtain motion reference data for the Unitree G1,
 see the [AMASS Retargeted for G1](https://huggingface.co/datasets/ember-lab-berkeley/AMASS_Retargeted_for_G1/tree/main)
-dataset on Hugging Face.
+dataset on Hugging Face. We provide a utility script `scripts/utils/convert_retargeted_data_for_tracking.py` to convert this downloaded data into a format ready for training.
 ```
 
 ### Debug

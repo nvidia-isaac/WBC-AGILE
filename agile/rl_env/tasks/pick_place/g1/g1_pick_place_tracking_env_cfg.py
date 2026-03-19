@@ -23,11 +23,8 @@ from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR
 
 from agile.rl_env.assets import ASSET_DIR
 from agile.rl_env.assets.robots.unitree_g1 import (
-    ARM_JOINT_NAMES,
     G1_W_HANDS_AGILE_ACTION_SCALE,
     G1_W_HANDS_AGILE_CFG,
-    HAND_JOINT_NAMES,
-    WAIST_JOINT_NAMES,
 )
 from agile.rl_env.mdp.actions import JointPositionGUIActionCfg, ObjectPoseGUIActionCfg
 from agile.rl_env.mdp.rewards import RewardVisualizerCfg
@@ -70,11 +67,11 @@ class G1PickPlaceTrackingEnvCfg(PickPlaceTrackingEnvCfg):
         )
 
         self.actions.lower_body_joint_pos.policy_output_scale = G1_W_HANDS_AGILE_ACTION_SCALE
-        # Only include right arm/hand joints in the scale dict (must match joint_names=RIGHT_HAND_ARM_JOINT_NAMES)
+        # Only include right arm/hand joints in the scale dict.
         self.actions.upper_body_joint_pos.scale = {
             k: 0.05
             for k in G1_W_HANDS_AGILE_ACTION_SCALE.keys()
-            if k in (ARM_JOINT_NAMES + HAND_JOINT_NAMES + WAIST_JOINT_NAMES)
+            if ("hand" in k or "shoulder" in k or "elbow" in k or "wrist" in k) and "right" in k
         }
 
         # rewards

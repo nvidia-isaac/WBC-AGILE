@@ -366,7 +366,7 @@ class EventCfg:
         func=mdp.reset_robot_to_trajectory,
         mode="reset",
         params={
-            "trajectory_time_idx": (0, 150),
+            "trajectory_time_idx": (0, 100),
             "command_name": "tracking_command",
         },
     )
