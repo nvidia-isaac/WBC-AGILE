@@ -1,74 +1,74 @@
 # Algorithms
 
-This page documents AGILE's RL algorithms, policy architectures, and evaluation framework. AGILE uses a **custom fork of RSL-RL** enhanced with TensorDict support, additional regularization methods, and multi-GPU training capabilities.
+AGILE uses a custom fork of [RSL-RL](https://github.com/leggedrobotics/rsl_rl) (BSD 3-Clause) for PPO and distillation training. See the base library for standard PPO, distillation, and recurrent policy documentation. This page covers AGILE-specific enhancements.
 
-## Custom RSL-RL
+The custom fork lives in `agile/algorithms/rsl_rl/`.
 
-AGILE's algorithm stack lives in `agile/algorithms/rsl_rl/` and is based on the [RSL-RL](https://github.com/leggedrobotics/rsl_rl) library (BSD 3-Clause). Key differences from vanilla RSL-RL:
+## PPO Enhancements
 
-- **TensorDict observations**: Both actor and critic networks accept `TensorDict` inputs, enabling structured observation spaces where different sensor modalities are kept separate rather than concatenated into a flat vector.
-- **Symmetry augmentation and mirror loss**: Built-in support for left-right symmetry data augmentation and mirror loss regularization during PPO and distillation training.
-- **Random Network Distillation (RND)**: Intrinsic curiosity rewards for exploration via a predictor-target network pair.
-- **L2C2 regularization**: Lipschitz-Constrained Continuity regularization that penalizes large output changes for small input changes, encouraging smoother policies.
-- **Reward normalization**: EMA-based return variance normalization that adapts to curriculum changes during training.
-- **Critic warmup**: Option to train only the value function for an initial phase before introducing the policy gradient loss.
-- **Multi-GPU training**: Gradient synchronization across GPUs via `torch.distributed` with NCCL backend.
-- **Student-teacher distillation**: First-class support for distilling privileged teacher policies into deployable student policies, including recurrent variants.
+### TensorDict Observations
 
-## PPO Algorithm
+Both actor and critic networks accept `TensorDict` inputs, enabling structured observation spaces where different sensor modalities are kept separate rather than concatenated into a flat vector.
 
-The PPO implementation (`agile/algorithms/rsl_rl/rsl_rl/algorithms/ppo.py`) follows the standard Proximal Policy Optimization algorithm with several extensions.
+### Symmetry Augmentation and Mirror Loss
 
-### Core PPO Loop
+Left-right symmetry data augmentation during rollout collection and optional mirror loss that penalizes asymmetric actions for mirrored observations. Also applicable during distillation (non-recurrent students only).
 
-Each training iteration consists of:
-
-1. **Rollout collection**: The policy collects `num_steps_per_env` transitions from all parallel environments using `act()` and `process_env_step()`.
-2. **Return computation**: GAE (Generalized Advantage Estimation) computes advantages and returns via `compute_returns()`.
-3. **Policy update**: Mini-batch SGD over `num_learning_epochs` epochs with `num_mini_batches` per epoch.
-
-### Loss Components
-
-The total loss combines several terms:
-
-```
-loss = surrogate_loss + value_loss_coef * value_loss - entropy_coef * entropy
-     + [mirror_loss_coeff * symmetry_loss]     # if symmetry enabled
-     + [lambda_actor * l2c2_actor_loss]         # if L2C2 enabled
-     + [lambda_critic * l2c2_critic_loss]       # if L2C2 enabled
+```python
+algorithm = RslRlPpoAlgorithmCfg(
+    ...,
+    symmetry_cfg=RslRlSymmetryCfg(
+        use_data_augmentation=True,
+        use_mirror_loss=False,
+        data_augmentation_func=lr_mirror_T1,
+    ),
+)
 ```
 
-- **Surrogate loss**: Clipped PPO objective with configurable `clip_param` (default 0.2)
-- **Value loss**: Optionally clipped MSE between predicted and target values
-- **Entropy bonus**: Encourages exploration; can be annealed during training
-- **RND loss**: Trained separately with its own optimizer when RND is enabled
+### L2C2 Regularization
 
-### Adaptive Learning Rate
+Lipschitz-Constrained Continuity regularization. Interpolates between consecutive observations `obs_t` and `obs_{t+1}` with a random factor, then penalizes large output changes via MSE. Applied to both actor and critic. Terminal states are excluded.
 
-When `schedule="adaptive"`, the learning rate adjusts based on the KL divergence between old and new policies:
+```python
+algorithm = RslRlPpoAlgorithmCfg(
+    ...,
+    l2c2_cfg=RslRlL2C2Cfg(
+        lambda_actor=1.0,
+        lambda_critic=0.1,
+    ),
+)
+```
 
-- If KL > 2 * `desired_kl`: learning rate is divided by 1.5
-- If KL < `desired_kl` / 2: learning rate is multiplied by 1.5
-- Learning rate is clamped to [1e-5, 1e-2]
+### Reward Normalization
 
-### Key Hyperparameters
+`ReturnVarianceNormalization` normalizes rewards to achieve approximately unit-variance returns using EMA statistics that adapt to curriculum changes.
 
-| Parameter | Description | Typical Value |
-|-----------|-------------|---------------|
-| `num_learning_epochs` | SGD epochs per rollout | 5 |
-| `num_mini_batches` | Mini-batches per epoch | 4 |
-| `clip_param` | PPO clipping parameter | 0.2 |
-| `gamma` | Discount factor | 0.99 |
-| `lam` | GAE lambda | 0.95 |
-| `learning_rate` | Adam learning rate | 1e-3 |
-| `entropy_coef` | Entropy bonus coefficient | 0.005-0.01 |
-| `desired_kl` | Target KL for adaptive LR | 0.01 |
-| `max_grad_norm` | Gradient clipping norm | 1.0 |
-| `value_loss_coef` | Value loss weight | 1.0 |
+```
+scale = sigma * gamma_factor * return_correction + eps
+normalized_reward = reward / scale
+```
+
+where `gamma_factor = 1 / sqrt(1 - gamma^2)`.
+
+**Return-scale correction**: The i.i.d. formula underestimates return variance when rewards are temporally correlated (e.g., a fallen robot produces many consecutive low rewards). A correction factor is EMA-tracked from measured GAE return standard deviations once per rollout, using the product invariance `return_std * correction = K` for oscillation-free convergence.
+
+**Outlier clipping**: Rewards beyond `outlier_threshold` standard deviations from the running mean are clipped before updating statistics and in the normalized output.
+
+```python
+algorithm = RslRlPpoAlgorithmCfg(
+    ...,
+    reward_normalization_cfg=RslRlRewardNormalizationCfg(
+        decay=0.999,           # EMA decay (~693 steps half-life)
+        epsilon=1e-2,          # Numerical stability
+        return_scale_decay=0.999,  # Return-scale correction (None to disable)
+        outlier_threshold=10.0,    # Clip beyond N std deviations (None to disable)
+    ),
+)
+```
 
 ### Termination Handling
 
-AGILE extends standard timeout bootstrapping with a configurable good/bad termination system that provides scale-invariant reward shaping at episode boundaries.
+AGILE extends standard timeout bootstrapping with a configurable good/bad termination system that provides reward shaping at episode boundaries.
 
 **Timeout bootstrapping** (standard): When an episode ends due to a time limit, the value estimate is bootstrapped to avoid biasing the value function:
 
@@ -92,247 +92,45 @@ For both good and bad terminations, the value is first bootstrapped (making the 
 
 The `VecEnvWrapper` scans `DoneTermCfg` metadata at initialization and aggregates per-environment sigmas (max across fired terms) into `bad_termination_sigma` / `good_termination_sigma` tensors passed to PPO via the `infos` dict.
 
-## Distillation Algorithm
-
-The distillation algorithm (`agile/algorithms/rsl_rl/rsl_rl/algorithms/distillation.py`) trains a student policy to mimic a pre-trained teacher using DAgger-style on-policy distillation.
-
-### How It Works
-
-1. The **student** controls the robot in the environment, collecting on-policy rollouts
-2. At each step, both student and teacher produce actions from their respective observations -- the student sees limited observations (e.g., proprioception only), the teacher sees privileged observations (e.g., terrain height maps, true velocities)
-3. The loss is the MSE (or Huber) between student and teacher actions
-4. For recurrent students, gradients flow through `gradient_length` time steps via BPTT
-
-Since data is collected under the student's own state visitation (not replayed teacher trajectories), training naturally covers the states the student actually encounters during deployment, avoiding the distribution mismatch of pure behavior cloning.
-
-### Key Parameters
-
-| Parameter | Description | Typical Value |
-|-----------|-------------|---------------|
-| `num_learning_epochs` | Epochs per rollout | 5 |
-| `gradient_length` | BPTT truncation length | 15 |
-| `learning_rate` | Adam learning rate | 1e-3 |
-| `loss_type` | Loss function (`mse` or `huber`) | `mse` |
-| `weight_decay` | L2 regularization | 0.0 (or 1e-4) |
-
-### Symmetry in Distillation
-
-Mirror loss can be applied during distillation for non-recurrent student policies. When enabled, the student is penalized for producing asymmetric actions given left-right mirrored observations. This is automatically disabled for recurrent policies.
-
-## Policy Architectures
-
-All policy modules are in `agile/algorithms/rsl_rl/rsl_rl/modules/`.
-
-### ActorCritic (MLP)
-
-The base feedforward policy (`actor_critic.py`) with separate actor and critic MLP networks.
-
-**Architecture:**
-- Actor: `SimpleMLP(obs_dim -> hidden_dims -> action_dim)`
-- Critic: `SimpleMLP(critic_obs_dim -> hidden_dims -> 1)`
-- Action distribution: Gaussian with configurable noise type
-
-**Noise standard deviation types:**
-- `scalar`: Single learnable parameter shared across actions (default)
-- `log`: Log-space learnable parameter per action dimension
-- `pred`: Network predicts both mean and log-std (doubles actor output dimension)
-
-**Example configuration:**
-```python
-policy = RslRlPpoActorCriticCfg(
-    init_noise_std=1.0,
-    actor_hidden_dims=[256, 256, 128],
-    critic_hidden_dims=[512, 256, 128],
-    activation="elu",
-)
-```
-
-### ActorCriticRecurrent (RNN)
-
-Extends `ActorCritic` with GRU or LSTM memory layers (`actor_critic_recurrent.py`).
-
-**Architecture:**
-- Actor: `Memory(obs_dim -> rnn_hidden_dim)` followed by `MLP(rnn_hidden_dim -> action_dim)`
-- Critic: `Memory(critic_obs_dim -> rnn_hidden_dim)` followed by `MLP(rnn_hidden_dim -> 1)`
-
-Separate RNN memories are maintained for actor and critic. Hidden states are reset when episodes terminate.
-
-### StudentTeacher (MLP)
-
-For distillation training (`student_teacher.py`). The teacher network is frozen and produces target actions from privileged observations.
-
-**Architecture:**
-- Student: `MLP(student_obs_dim -> hidden_dims -> action_dim)` (trainable)
-- Teacher: `MLP(teacher_obs_dim -> hidden_dims -> action_dim)` (frozen)
-
-The `load_state_dict` method intelligently handles loading:
-- From RL training checkpoint: maps `actor.*` weights to teacher network
-- From distillation checkpoint: loads both student and teacher
-
-Supports optional dropout regularization to prevent overfitting during distillation.
-
-### StudentTeacherRecurrent (RNN)
-
-Recurrent variant (`student_teacher_recurrent.py`) that adds LSTM/GRU memory to the student network.
-
-**Architecture:**
-- Student: `Memory(student_obs_dim -> rnn_hidden_dim)` followed by `MLP(rnn_hidden_dim -> action_dim)`
-- Teacher: optionally recurrent if `teacher_recurrent=True`
-
-Hidden states are properly managed: detached at gradient boundaries and reset on episode termination.
-
-### StudentTrainedTeacher
-
-A variant (`student_trained_teacher.py`) where the teacher is loaded from a pre-exported TorchScript model rather than from a checkpoint's state dict. This enables distilling from any exported policy without needing to match the teacher's network architecture in code.
-
-## Observation Normalization
-
-Two normalization approaches are available (`agile/algorithms/rsl_rl/rsl_rl/modules/normalizer.py`):
-
-### EmpiricalNormalization
-
-Running mean/variance normalization applied to observations:
-
-```
-normalized = (x - running_mean) / (running_std + eps)
-```
-
-Statistics are updated during training and frozen during evaluation. Controlled by `empirical_normalization` in the runner config.
-
-### ReturnVarianceNormalization
-
-Normalizes rewards to achieve approximately unit-variance returns. Uses EMA (exponential moving average) for variance tracking, which adapts to curriculum changes better than cumulative statistics.
-
-```
-scale = sigma * gamma_factor * return_correction + eps
-normalized_reward = reward / scale
-```
-
-where `gamma_factor = 1 / sqrt(1 - gamma^2)`.
-
-**Return-scale correction**: The i.i.d. formula underestimates return variance when rewards are temporally correlated (e.g., a fallen robot produces many consecutive low rewards). A correction factor is EMA-tracked from measured GAE return standard deviations once per rollout, using the product invariance `return_std * correction = K` for oscillation-free convergence.
-
-**Outlier clipping**: Rewards beyond `outlier_threshold` standard deviations from the running mean are clipped before updating statistics and in the normalized output. This prevents rare reward spikes from destabilizing the normalizer.
-
-Configuration via `RslRlRewardNormalizationCfg`:
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `decay` | 0.999 | EMA decay for reward variance (~693 steps half-life) |
-| `epsilon` | 1e-2 | Numerical stability |
-| `return_scale_decay` | 0.999 | EMA decay for return-scale correction (None to disable) |
-| `outlier_threshold` | 10.0 | Clip beyond this many std deviations (None to disable) |
-
-## Rollout Storage
-
-The `RolloutStorage` class (`agile/algorithms/rsl_rl/rsl_rl/storage/rollout_storage.py`) manages trajectory data during training. It supports two training modes:
-
-- **RL mode**: Stores observations, actions, rewards, values, log-probs, advantages, and returns for PPO training. Provides both `mini_batch_generator` (feedforward) and `recurrent_mini_batch_generator` (RNN) iterators.
-- **Distillation mode**: Stores observations and privileged teacher actions. Provides a sequential `generator()` for BPTT.
-
-Both modes support optional RND states and L2C2 consecutive-observation pairs.
-
-## On-Policy Runner
-
-The `OnPolicyRunner` (`agile/algorithms/rsl_rl/rsl_rl/runners/on_policy_runner.py`) orchestrates the full training loop.
-
-### Training Loop
-
-```
-for iteration in range(max_iterations):
-    1. Anneal entropy coefficient (if enabled)
-    2. Collect rollouts (num_steps_per_env steps per environment)
-    3. Compute returns (RL only)
-    4. Update policy (PPO or Distillation)
-    5. Log metrics to W&B/TensorBoard/Neptune
-    6. Save checkpoint every save_interval iterations
-```
-
-### Logging
-
-The runner logs the following metrics:
-
-- **Train/**: mean reward, mean episode length, entropy coefficient
-- **Loss/**: surrogate, value function, entropy, learning rate, plus optional RND/symmetry/L2C2 losses
-- **Policy/**: mean action noise std
-- **Perf/**: FPS, collection time, learning time
-- **Episode/**: per-episode info from the environment (reward terms, success metrics)
-- **Rewards_Raw/**, **Rewards_Weighted/**: per-term reward statistics (if recorder manager is active)
+Unlike the other enhancements on this page, termination handling is configured in the **task env config** (in the `TerminationsCfg` class), not in the PPO algorithm config.
 
 ### Entropy Coefficient Annealing
 
-The runner supports automatic entropy coefficient decay:
+Automatic entropy coefficient decay gated on training progress and episode quality:
 
-1. Entropy annealing begins when `progress > entropy_coef_annealing_start_progress`
+1. Annealing begins when `progress > entropy_coef_annealing_start_progress`
 2. AND `mean_episode_length > success_episode_length_threshold`
 3. Decay is either linear (default) or exponential (if `entropy_annealing_decay_rate` is set)
-4. Coefficient is clamped to `min_entropy_coef` to prevent training instability
-
-### Checkpoint Format
-
-Saved checkpoints (`model_{iteration}.pt`) contain:
-
-- `model_state_dict`: Policy network parameters
-- `optimizer_state_dict`: Adam optimizer state
-- `iter`: Current training iteration
-- `obs_norm_state_dict` / `privileged_obs_norm_state_dict`: Normalization statistics (if enabled)
-- `rnd_state_dict` / `rnd_optimizer_state_dict`: RND state (if enabled)
-- `reward_norm_state_dict`: Reward normalizer state (if enabled)
-
-## Evaluation Framework
-
-AGILE includes a comprehensive evaluation framework in `agile/algorithms/evaluation/`. See {doc}`evaluation` for usage instructions, scenario configs, report generation, and framework internals.
-
-## Configuration Classes
-
-RL configuration is defined through dataclass-based configs in `agile/rl_env/rsl_rl/rl_cfg.py`.
-
-### RslRlOnPolicyRunnerCfg
-
-Top-level runner configuration:
+4. Coefficient is clamped to `min_entropy_coef`
 
 ```python
-@configclass
-class RslRlOnPolicyRunnerCfg:
-    seed: int = 42
-    device: str = "cuda:0"
-    num_steps_per_env: int     # Steps per env per rollout
-    max_iterations: int         # Total training iterations
-    empirical_normalization: bool  # Enable observation normalization
-    policy: RslRlPpoActorCriticCfg  # Policy architecture
-    algorithm: RslRlPpoAlgorithmCfg  # Algorithm hyperparameters
-    save_interval: int          # Checkpoint frequency
-    logger: str = "tensorboard"  # "tensorboard", "wandb", or "neptune"
-    # Entropy annealing
-    enable_entropy_coef_annealing: bool = False
-    entropy_annealing_decay_rate: float | None = None
-    min_entropy_coef: float = 0.001
+runner_cfg = RslRlOnPolicyRunnerCfg(
+    ...,
+    enable_entropy_coef_annealing=True,
+    entropy_annealing_decay_rate=0.9995,
+    min_entropy_coef=0.001,
+)
 ```
 
-### RslRlPpoAlgorithmCfg
+## Distillation Enhancements
 
-PPO hyperparameters with optional extensions:
+AGILE extends RSL-RL's DAgger-style distillation with the following modules:
 
-```python
-@configclass
-class RslRlPpoAlgorithmCfg:
-    class_name: str = "PPO"
-    num_learning_epochs: int
-    num_mini_batches: int
-    learning_rate: float
-    schedule: str              # "fixed" or "adaptive"
-    gamma: float
-    lam: float
-    entropy_coef: float
-    clip_param: float
-    # Optional extensions
-    symmetry_cfg: RslRlSymmetryCfg | None = None
-    rnd_cfg: RslRlRndCfg | None = None
-    l2c2_cfg: RslRlL2C2Cfg | None = None
-    reward_normalization_cfg: RslRlRewardNormalizationCfg | None = None
-```
+### Symmetry in Distillation
 
-### Example: Full PPO Config
+Mirror loss can be applied during distillation for non-recurrent student policies. The student is penalized for producing asymmetric actions given left-right mirrored observations. Automatically disabled for recurrent policies.
+
+### StudentTrainedTeacher
+
+A distillation variant (`student_trained_teacher.py`) where the teacher is loaded from a pre-exported TorchScript model rather than from a checkpoint's state dict. This enables distilling from any exported policy without needing to match the teacher's network architecture in code.
+
+### StudentFinetuneRecurrent
+
+After distillation, the student can be fine-tuned with RL (`student_finetune_recurrent.py`). The distilled student is paired with a fresh critic and trained with PPO, allowing the student to improve beyond the teacher's performance while retaining the distilled behavior as initialization.
+
+## Configuration Examples
+
+### PPO with Enhancements
 
 ```python
 @configclass
@@ -341,8 +139,6 @@ class T1VelocityPpoRunnerCfg(RslRlOnPolicyRunnerCfg):
     num_steps_per_env = 24
     max_iterations = 100_000
     save_interval = 250
-    experiment_name = "velocity_t1_lower"
-    wandb_project = "Velocity-T1-Lower"
     empirical_normalization = False
     enable_entropy_coef_annealing = True
     entropy_annealing_decay_rate = 0.9995
@@ -370,10 +166,18 @@ class T1VelocityPpoRunnerCfg(RslRlOnPolicyRunnerCfg):
             use_mirror_loss=False,
             data_augmentation_func=lr_mirror_T1,
         ),
+        reward_normalization_cfg=RslRlRewardNormalizationCfg(
+            decay=0.999,
+            epsilon=1e-2,
+        ),
+        l2c2_cfg=RslRlL2C2Cfg(
+            lambda_actor=1.0,
+            lambda_critic=0.1,
+        ),
     )
 ```
 
-### Example: Distillation Config
+### Distillation
 
 ```python
 @configclass
@@ -393,3 +197,7 @@ class G1DistillationRunnerCfg(RslRlOnPolicyRunnerCfg):
         activation="elu",
     )
 ```
+
+## Evaluation Framework
+
+See {doc}`evaluation` for the evaluation pipeline, scenario configs, report generation, and Sim-to-MuJoCo transfer.
