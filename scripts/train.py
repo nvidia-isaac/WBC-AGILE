@@ -20,6 +20,7 @@
 # flake8: noqa
 
 import argparse
+import os
 import sys
 
 from isaaclab.app import AppLauncher
@@ -63,6 +64,10 @@ if args_cli.video:
 
 # clear out sys.argv for Hydra
 sys.argv = [sys.argv[0]] + hydra_args
+
+# Auto-detect distributed training launched by torchrun
+if int(os.getenv("WORLD_SIZE", "1")) > 1:
+    args_cli.distributed = True
 
 # launch omniverse app
 app_launcher = AppLauncher(args_cli)
@@ -138,6 +143,15 @@ def main(
     # note: certain randomizations occur in the environment initialization so we set the seed here
     env_cfg.seed = agent_cfg.seed
     env_cfg.sim.device = args_cli.device if args_cli.device is not None else env_cfg.sim.device
+
+    # multi-gpu distributed training configuration
+    if getattr(args_cli, "distributed", False):
+        env_cfg.sim.device = f"cuda:{app_launcher.local_rank}"
+        agent_cfg.device = f"cuda:{app_launcher.local_rank}"
+        # set seed per rank for diversity across GPUs
+        seed = agent_cfg.seed + app_launcher.local_rank
+        env_cfg.seed = seed
+        agent_cfg.seed = seed
 
     # specify directory for logging experiments
     log_root_path = os.path.join("logs", "rsl_rl", agent_cfg.experiment_name)

@@ -53,6 +53,8 @@ original_reset = ContactSensor.reset
 
 def reset_patch(self: ContactSensor, env_ids: Sequence[int] | None = None):
     original_reset(self, env_ids)
+    if isinstance(env_ids, torch.Tensor) and env_ids.device != self._data.velocities_w.device:
+        env_ids = env_ids.to(self._data.velocities_w.device)
     self._data.velocities_w[env_ids] = 0.0  # type: ignore
     self._data.velocities_w_history[env_ids] = 0.0  # type: ignore
 
@@ -86,6 +88,12 @@ original_update_buffers_impl = ContactSensor._update_buffers_impl
 def update_buffers_impl_patch(self: ContactSensor, env_ids: Sequence[int]):
     original_update_buffers_impl(self, env_ids)
     velocities_w = self.body_physx_view.get_velocities()[:, :3]
+    # Ensure tensors are on the same device (needed for multi-GPU distributed training)
+    target_device = self._data.velocities_w.device
+    if isinstance(env_ids, torch.Tensor) and env_ids.device != target_device:
+        env_ids = env_ids.to(target_device)
+    if velocities_w.device != target_device:
+        velocities_w = velocities_w.to(target_device)
     self._data.velocities_w[env_ids, :, :] = velocities_w.view(-1, self._num_bodies, 3)[env_ids]  # type: ignore
 
     if self.cfg.history_length > 0:

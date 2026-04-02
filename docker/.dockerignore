@@ -1,0 +1,13 @@
+# Exclude large/unnecessary files from Docker build context
+logs/
+outputs/
+.git/
+*.pyc
+__pycache__/
+*.egg-info/
+.mypy_cache/
+.ruff_cache/
+docs/
+*.md
+!README.md
+local_assets/
