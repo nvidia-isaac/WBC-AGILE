@@ -13,7 +13,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import MISSING
+import os
+from dataclasses import MISSING
 
 from isaaclab.utils import configclass
 
@@ -30,7 +31,7 @@ class G1FlatEnvCfg(TrackingEnvCfg):
         self.actions.joint_pos.scale = G1_29DOF_ACTION_SCALE
         self.commands.motion.anchor_body_name = "torso_link"
         self.commands.motion.debug_vis = False
-        self.commands.motion.motion_file = MISSING
+        self.commands.motion.motion_file = os.environ.get("MOTION_FILE", MISSING)
         self.commands.motion.body_names = [
             "pelvis",
             "left_hip_roll_link",
