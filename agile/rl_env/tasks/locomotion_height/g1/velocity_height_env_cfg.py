@@ -475,11 +475,12 @@ class RewardsCfg:
     )
 
     impact_velocity = RewTerm(
-        func=mdp.impact_velocity_l1,
+        func=mdp.impact_velocity,
         weight=-0.5,
         params={
             "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*ankle_roll_link"),
             "force_threshold": 10.0,
+            "kernel": "l1",
         },
     )
 
