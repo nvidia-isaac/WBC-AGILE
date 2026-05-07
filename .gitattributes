@@ -27,3 +27,4 @@ docs/videos/unitree_g1_dancing_sim.gif filter=lfs diff=lfs merge=lfs -text
 docs/videos/unitree_g1_updown.gif filter=lfs diff=lfs merge=lfs -text
 docs/videos/unitree_g1_updown_sim.gif filter=lfs diff=lfs merge=lfs -text
 docs/videos/g1_apple_grasp_black_sort_bin_multi_objects_no_marker_reduced.gif filter=lfs diff=lfs merge=lfs -text
+agile/data/policy/velocity_height_g1/unitree_g1_velocity_height_recurrent_student.onnx filter=lfs diff=lfs merge=lfs -text
