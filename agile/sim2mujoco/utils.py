@@ -48,7 +48,7 @@ def quat_rotate_inverse(q: torch.Tensor, v: torch.Tensor) -> torch.Tensor:
     return a - b + c
 
 
-# Alias for compatibility with Isaac Lab naming convention.
+# Alias for compatibility with isaaclab naming convention
 quat_apply_inverse = quat_rotate_inverse
 
 

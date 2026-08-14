@@ -26,6 +26,7 @@ from __future__ import annotations
 import random
 
 from agile.algorithms.evaluation.eval_config import EvalConfig
+from agile.sim2mujoco.command_provider import CommandProvider, HeightCommandProvider, VelocityCommandProvider
 from agile.sim2mujoco.commands import CommandManager
 
 # Mapping from user-facing CLI names to CommandManager internals.
@@ -55,8 +56,9 @@ class Sim2MuJoCoCommandScheduler:
     def __init__(
         self,
         eval_config: EvalConfig,
-        command_manager: CommandManager,
         duration: float,
+        command_manager: CommandManager | None = None,
+        command_provider: CommandProvider | None = None,
         command_dim: int = 4,
         verbose: bool = True,
     ):
@@ -64,14 +66,18 @@ class Sim2MuJoCoCommandScheduler:
 
         Args:
             eval_config: Evaluation config loaded from YAML.
-            command_manager: CommandManager to inject commands into.
+            command_manager: CommandManager to inject velocity commands into.
+            command_provider: Command provider for non-velocity commands such as scalar height.
             duration: Total run duration in seconds (for sweep step generation).
             command_dim: 3 for velocity-only, 4 for velocity+height.
             verbose: Whether to print schedule application info.
         """
         self.command_manager = command_manager
+        self.command_provider = command_provider
         self.command_dim = command_dim
         self.verbose = verbose
+        if self.command_manager is None and isinstance(self.command_provider, VelocityCommandProvider):
+            self.command_manager = self.command_provider.manager
 
         env_cfg = eval_config.get_env_config(0)
         if env_cfg is None:
@@ -98,10 +104,13 @@ class Sim2MuJoCoCommandScheduler:
         if self.schedule:
             print("Preview:")
             for _i, step in enumerate(self.schedule[:5]):
-                if step.commands and "base_velocity" in step.commands:
-                    cmd = step.commands["base_velocity"]
-                    parts = [f"{k}={v}" for k, v in cmd.items()]
-                    print(f"  t={step.time:.1f}s: {', '.join(parts)}")
+                if step.commands:
+                    preview = []
+                    for command_name, cmd in step.commands.items():
+                        if isinstance(cmd, dict):
+                            preview.append(f"{command_name}: " + ", ".join(f"{k}={v}" for k, v in cmd.items()))
+                    if preview:
+                        print(f"  t={step.time:.1f}s: {'; '.join(preview)}")
             if len(self.schedule) > 5:
                 print(f"  ... and {len(self.schedule) - 5} more steps")
         print("=" * 80 + "\n")
@@ -125,7 +134,16 @@ class Sim2MuJoCoCommandScheduler:
 
     def _apply_step(self, step, step_index: int) -> None:
         """Apply a schedule step to CommandManager."""
-        if "base_velocity" not in step.commands:
+        if self.command_manager is not None and "base_velocity" in step.commands:
+            self._apply_base_velocity_step(step)
+            return
+
+        if isinstance(self.command_provider, HeightCommandProvider):
+            self._apply_height_step(step)
+
+    def _apply_base_velocity_step(self, step) -> None:
+        """Apply a base-velocity schedule step."""
+        if self.command_manager is None:
             return
 
         cmd = step.commands["base_velocity"]
@@ -142,11 +160,28 @@ class Sim2MuJoCoCommandScheduler:
         )
 
         current_cmd = (linear_x, linear_y, angular_z, height)
-        if current_cmd != self._last_printed_cmd:
+        if self.verbose and current_cmd != self._last_printed_cmd:
             parts = [f"vx={linear_x:.2f}", f"vy={linear_y:.2f}", f"wz={angular_z:.2f}"]
             if height is not None:
                 parts.append(f"h={height:.2f}")
             print(f"[Command] t={self.current_time:.2f}s | {', '.join(parts)}")
+            self._last_printed_cmd = current_cmd
+
+    def _apply_height_step(self, step) -> None:
+        """Apply a scalar height-command schedule step."""
+        if "height" in step.commands:
+            cmd = step.commands["height"]
+            height = float(cmd.get("height", cmd.get("base_height")))
+        elif "base_velocity" in step.commands and "base_height" in step.commands["base_velocity"]:
+            height = float(step.commands["base_velocity"]["base_height"])
+        else:
+            return
+
+        self.command_provider.set_height(height)
+
+        current_cmd = ("height", height)
+        if self.verbose and current_cmd != self._last_printed_cmd:
+            print(f"[Command] t={self.current_time:.2f}s | height={height:.2f}")
             self._last_printed_cmd = current_cmd
 
 

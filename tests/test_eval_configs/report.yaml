@@ -1,0 +1,34 @@
+# Human-facing report config: one longer, deterministic rollout per env so the recorded clips show
+# the policy walking and changing height. Pair with `eval_pipeline.py --duration 10` (the eval video
+# length); episode_length_s is kept above the duration so the clip is a single continuous rollout.
+evaluation:
+  task_name: "Velocity-Height-G1-History-v0"
+  num_envs: 2
+  episode_length_s: 12.0
+  num_episodes: 1
+  env_overrides:
+    events:
+      disable_interval_events: true # Disable disturbances for reproducibility
+  environments:
+    # Environment 0: forward-velocity sweep
+    - env_ids: [0]
+      name: "report_x_test"
+      sweep:
+        interval: 3.0
+        commands:
+          base_velocity:
+            lin_vel_x: [0.0, 0.5]
+            lin_vel_y: 0.0
+            ang_vel_z: 0.0
+            base_height: 0.72
+    # Environment 1: base-height sweep
+    - env_ids: [1]
+      name: "report_height_test"
+      sweep:
+        interval: 3.0
+        commands:
+          base_velocity:
+            lin_vel_x: 0.0
+            lin_vel_y: 0.0
+            ang_vel_z: 0.0
+            base_height: [0.65, 0.72]

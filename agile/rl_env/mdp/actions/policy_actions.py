@@ -86,7 +86,7 @@ class AgileBasedLowerBodyAction(ActionTerm):
         self._policy_output_scale = torch.ones(self.num_envs, len(self._joint_names), device=self.device)
         self._policy_output_scale[:, index_list] = torch.tensor(value_list, device=self.device)
 
-        self._policy_output_offset = self._asset.data.default_joint_pos[:, self._joint_ids].clone()
+        self._policy_output_offset = self._asset.data.default_joint_pos.torch[:, self._joint_ids].clone()
 
         # Create tensors to store raw and processed actions
         self._raw_actions = torch.zeros(self.num_envs, len(self._joint_ids), device=self.device)

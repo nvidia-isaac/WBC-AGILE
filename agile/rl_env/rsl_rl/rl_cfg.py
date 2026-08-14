@@ -21,10 +21,10 @@
 
 from __future__ import annotations
 
-from dataclasses import MISSING
+from dataclasses import MISSING, fields, is_dataclass
 from typing import Literal
 
-from isaaclab.utils import configclass
+from isaaclab.utils.configclass import configclass
 
 from .l2c2_cfg import RslRlL2C2Cfg
 from .reward_normalization_cfg import RslRlRewardNormalizationCfg
@@ -198,6 +198,10 @@ class RslRlOnPolicyRunnerCfg:
     """The rate of the entropy coefficient annealing.
     If None, decay is linear with respect to the iteration, else exponential with respect to the progress."""
 
+    min_entropy_coef: float = 0.001
+    """The minimum value for the entropy coefficient. If the entropy coefficient decays too low, learning can become unstable.
+    This threshold is in effect when `entropy_annealing_decay_rate` is set. Otherwise, it is ignored."""
+
     save_interval: int = MISSING
     """The number of iterations between saves."""
 
@@ -244,3 +248,149 @@ class RslRlOnPolicyRunnerCfg:
 
     load_optimizer: bool = True
     """Whether to load the optimizer. Default is True."""
+
+    def to_rsl_rl_dict(self) -> dict:
+        """Return a native rsl_rl 5.x runner dictionary."""
+        algorithm = _as_plain_dict(self.algorithm)
+        policy = _as_plain_dict(self.policy)
+        is_distillation = algorithm.get("class_name") == "Distillation"
+
+        cfg = {
+            "class_name": "DistillationRunner" if is_distillation else "OnPolicyRunner",
+            "seed": self.seed,
+            "device": self.device,
+            "num_steps_per_env": self.num_steps_per_env,
+            "max_iterations": self.max_iterations,
+            "save_interval": self.save_interval,
+            "experiment_name": self.experiment_name,
+            "run_name": self.run_name,
+            "logger": self.logger,
+            "neptune_project": self.neptune_project,
+            "wandb_project": self.wandb_project,
+            "resume": self.resume,
+            "load_run": self.load_run,
+            "load_checkpoint": self.load_checkpoint,
+            "load_optimizer": self.load_optimizer,
+            "obs_groups": {},
+            "algorithm": algorithm,
+            "enable_entropy_coef_annealing": self.enable_entropy_coef_annealing,
+            "entropy_coef_annealing_start_progress": self.entropy_coef_annealing_start_progress,
+            "enable_entropy_coef_annealing_success_rate": self.enable_entropy_coef_annealing_success_rate,
+            "entropy_annealing_decay_rate": self.entropy_annealing_decay_rate,
+            "min_entropy_coef": self.min_entropy_coef,
+        }
+
+        if is_distillation:
+            cfg["student"] = _student_model_cfg(policy, self.empirical_normalization)
+            cfg["teacher"] = _jit_teacher_model_cfg(policy)
+        else:
+            cfg["actor"] = _actor_model_cfg(policy, self.empirical_normalization)
+            cfg["critic"] = _critic_model_cfg(policy, self.empirical_normalization)
+
+        return cfg
+
+
+def rsl_rl_cfg_to_dict(agent_cfg: RslRlOnPolicyRunnerCfg) -> dict:
+    """Return a native rsl_rl 5.x runner dictionary for an AGILE configclass."""
+    return agent_cfg.to_rsl_rl_dict()
+
+
+def _as_plain_dict(value):
+    if isinstance(value, type(MISSING)):
+        return value
+    if is_dataclass(value):
+        return {field.name: _as_plain_dict(getattr(value, field.name)) for field in fields(value)}
+    if isinstance(value, dict):
+        return {key: _as_plain_dict(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_as_plain_dict(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_as_plain_dict(item) for item in value)
+    return value
+
+
+def _distribution_cfg(policy: dict) -> dict:
+    noise_std_type = policy.get("noise_std_type", "scalar")
+    if noise_std_type == "pred":
+        return {
+            "class_name": "HeteroscedasticGaussianDistribution",
+            "init_std": policy["init_noise_std"],
+            "std_type": "log",
+        }
+    return {
+        "class_name": "GaussianDistribution",
+        "init_std": policy["init_noise_std"],
+        "std_type": noise_std_type,
+    }
+
+
+def _actor_model_cfg(policy: dict, empirical_normalization: bool) -> dict:
+    class_name = "RNNModel" if policy.get("class_name") == "ActorCriticRecurrent" else "MLPModel"
+    cfg = {
+        "class_name": class_name,
+        "hidden_dims": policy["actor_hidden_dims"],
+        "activation": policy["activation"],
+        "obs_normalization": empirical_normalization,
+        "distribution_cfg": _distribution_cfg(policy),
+    }
+    if class_name == "RNNModel":
+        cfg.update(
+            {
+                "rnn_type": policy["rnn_type"],
+                "rnn_hidden_dim": policy["rnn_hidden_dim"],
+                "rnn_num_layers": policy["rnn_num_layers"],
+            }
+        )
+    return cfg
+
+
+def _critic_model_cfg(policy: dict, empirical_normalization: bool) -> dict:
+    class_name = "RNNModel" if policy.get("class_name") == "ActorCriticRecurrent" else "MLPModel"
+    cfg = {
+        "class_name": class_name,
+        "hidden_dims": policy["critic_hidden_dims"],
+        "activation": policy["activation"],
+        "obs_normalization": empirical_normalization,
+    }
+    if class_name == "RNNModel":
+        cfg.update(
+            {
+                "rnn_type": policy["rnn_type"],
+                "rnn_hidden_dim": policy["rnn_hidden_dim"],
+                "rnn_num_layers": policy["rnn_num_layers"],
+            }
+        )
+    return cfg
+
+
+def _student_model_cfg(policy: dict, empirical_normalization: bool) -> dict:
+    class_name = "RNNModel" if policy.get("class_name") == "StudentTrainedTeacherRecurrent" else "MLPModel"
+    cfg = {
+        "class_name": class_name,
+        "hidden_dims": policy["student_hidden_dims"],
+        "activation": policy.get("activation", "elu"),
+        "obs_normalization": empirical_normalization,
+        "distribution_cfg": {
+            "class_name": "GaussianDistribution",
+            "init_std": policy.get("init_noise_std", 0.1),
+            "std_type": policy.get("noise_std_type", "scalar"),
+        },
+    }
+    if class_name == "RNNModel":
+        cfg.update(
+            {
+                "rnn_type": policy.get("rnn_type", "lstm"),
+                "rnn_hidden_dim": policy.get("rnn_hidden_dim", 256),
+                "rnn_num_layers": policy.get("rnn_num_layers", 1),
+            }
+        )
+    if policy.get("dropout_rate", 0.0) != 0.0:
+        cfg["dropout_rate"] = policy["dropout_rate"]
+    return cfg
+
+
+def _jit_teacher_model_cfg(policy: dict) -> dict:
+    return {
+        "class_name": "JitTeacherModel",
+        "teacher_path": policy["teacher_path"],
+    }

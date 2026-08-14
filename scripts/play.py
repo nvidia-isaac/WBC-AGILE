@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 # SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 #
@@ -68,7 +70,9 @@ from isaaclab.terrains import TerrainImporterCfg  # noqa: E402
 import isaaclab.sim as sim_utils  # noqa: E402
 
 # Ensure task modules are imported/registered
+import agile.isaaclab_extras.monkey_patches  # noqa: E402, F401
 import agile.rl_env.tasks  # noqa: F401, E402
+from agile.isaaclab_extras.record_video import EfficientRecordVideo
 import isaaclab_tasks  # noqa: F401, E402
 
 # -----------------------------------------------------------------------------#
@@ -164,7 +168,7 @@ def main() -> None:
         }
         print("[INFO] Recording video.")
         print_dict(video_kwargs, nesting=4)
-        env = gym.wrappers.RecordVideo(env, **video_kwargs)
+        env = EfficientRecordVideo(env, app_launcher=app_launcher, **video_kwargs)
 
     # Use step_dt (control timestep) instead of physics_dt for proper timing
     dt = env.unwrapped.step_dt

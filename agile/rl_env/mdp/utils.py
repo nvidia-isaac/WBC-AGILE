@@ -134,8 +134,8 @@ def transform_to_asset_frame(positions: torch.Tensor, asset: Articulation | Rigi
         Positions in asset frame with shape [num_envs, num_points, 3]
     """
     # Get asset pose in world frame
-    root_pos_w = asset.data.root_pos_w
-    root_quat_w = asset.data.root_quat_w
+    root_pos_w = asset.data.root_pos_w.torch
+    root_quat_w = asset.data.root_quat_w.torch
 
     # Step 1: Translate positions relative to asset center
     translated_positions = positions - root_pos_w.unsqueeze(1)  # [num_envs, num_points, 3]
@@ -168,11 +168,11 @@ def get_body_velocities_and_forces(
 
     # Get velocities for bodies from robot data
     # Shape: [num_envs, num_bodies, 3]
-    body_velocities = robot.data.body_vel_w[:, body_ids]
+    body_velocities = robot.data.body_vel_w.torch[:, body_ids]
 
     # Get contact forces for bodies
     # Shape: [num_envs, num_bodies, 3]
-    contact_forces = contact_sensor.data.net_forces_w[:, body_ids]
+    contact_forces = contact_sensor.data.net_forces_w.torch[:, body_ids]
 
     return body_velocities, contact_forces
 

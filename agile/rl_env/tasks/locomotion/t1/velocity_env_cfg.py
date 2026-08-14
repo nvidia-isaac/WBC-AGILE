@@ -15,6 +15,8 @@
 
 import math
 
+from isaaclab_physx.physics import PhysxCfg
+
 import isaaclab.sim as sim_utils
 from isaaclab.assets import AssetBaseCfg
 from isaaclab.envs import ManagerBasedRLEnvCfg
@@ -28,9 +30,9 @@ from isaaclab.managers import TerminationTermCfg as DoneTerm
 from isaaclab.scene import InteractiveSceneCfg
 from isaaclab.sensors import ContactSensorCfg, RayCasterCfg, patterns
 from isaaclab.terrains import TerrainImporterCfg
-from isaaclab.utils import configclass
 from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR, ISAACLAB_NUCLEUS_DIR
-from isaaclab.utils.noise import AdditiveUniformNoiseCfg as Unoise  # noqa: F401
+from isaaclab.utils.configclass import configclass
+from isaaclab.utils.noise import UniformNoiseCfg as Unoise  # noqa: F401
 
 from agile.rl_env import mdp
 from agile.rl_env.assets.robots import booster_t1
@@ -650,7 +652,9 @@ class T1LowerVelocityEnvCfg(ManagerBasedRLEnvCfg):
         self.sim.dt = 1.0 / self.physics_freq
         self.sim.render_interval = self.decimation
         self.sim.physics_material = self.scene.terrain.physics_material
-        self.sim.physx.solver_type = 1
+        if self.sim.physics is None:
+            self.sim.physics = PhysxCfg()
+        self.sim.physics.solver_type = 1
 
         if self.scene.contact_forces is not None:
             self.scene.contact_forces.update_period = self.sim.dt
@@ -669,3 +673,14 @@ class T1LowerVelocityEnvCfg(ManagerBasedRLEnvCfg):
         else:
             if self.scene.terrain.terrain_generator is not None:
                 self.scene.terrain.terrain_generator.curriculum = False
+
+    def eval(self):
+        self.scene.terrain.terrain_type = "plane"
+        self.scene.terrain.terrain_generator = None
+        self.viewer.eye = (-2.5, -5.0, 2.0)
+        self.viewer.lookat = (0.0, 0.0, 0.75)
+        self.viewer.origin_type = "world"
+        self.rewards = None
+        self.curriculum = None
+        # Keep this eval-only: T1 training symmetry does not mirror its joint_acc term.
+        self.observations.eval = mdp.EvaluationObservationsCfg()

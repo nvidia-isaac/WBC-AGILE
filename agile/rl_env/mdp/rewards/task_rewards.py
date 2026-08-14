@@ -13,13 +13,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# ruff: noqa: I001
 
 import torch
 
 from isaaclab.assets import Articulation, RigidObject
 from isaaclab.envs import ManagerBasedRLEnv
 from isaaclab.managers import SceneEntityCfg
-from isaaclab.sensors import RayCaster
+from isaaclab.sensors import ContactSensor, RayCaster
 from isaaclab.utils.math import quat_apply_inverse, yaw_quat
 
 from agile.rl_env.mdp.commands import (
@@ -57,9 +58,9 @@ def standing_at_timeout(
     asset: RigidObject = env.scene[asset_cfg.name]
     if sensor_cfg is not None:
         sensor: RayCaster = env.scene[sensor_cfg.name]
-        current_height = asset.data.root_pos_w[:, 2] - torch.mean(sensor.data.ray_hits_w[..., 2], dim=1)
+        current_height = asset.data.root_pos_w.torch[:, 2] - torch.mean(sensor.data.ray_hits_w[..., 2], dim=1)
     else:
-        current_height = asset.data.root_pos_w[:, 2]
+        current_height = asset.data.root_pos_w.torch[:, 2]
 
     is_standing = current_height > min_height
 
@@ -115,15 +116,15 @@ def static_at_goal_exp(
 
     # Get joint velocities
     if asset_cfg.joint_ids is not None and len(asset_cfg.joint_ids) > 0:
-        joint_vel = robot.data.joint_vel[:, asset_cfg.joint_ids]
+        joint_vel = robot.data.joint_vel.torch[:, asset_cfg.joint_ids]
     else:
-        joint_vel = robot.data.joint_vel
+        joint_vel = robot.data.joint_vel.torch
 
     joint_vel_norm_sq = torch.mean(torch.square(joint_vel), dim=-1)
 
     # Get root velocity (linear xy + angular z)
-    root_lin_vel_xy = robot.data.root_lin_vel_b[:, :2]  # [num_envs, 2]
-    root_ang_vel_z = robot.data.root_ang_vel_b[:, 2:3]  # [num_envs, 1]
+    root_lin_vel_xy = robot.data.root_lin_vel_b.torch[:, :2]  # [num_envs, 2]
+    root_ang_vel_z = robot.data.root_ang_vel_b.torch[:, 2:3]  # [num_envs, 1]
     root_vel = torch.cat([root_lin_vel_xy, root_ang_vel_z], dim=-1)  # [num_envs, 3]
     root_vel_norm_sq = torch.mean(torch.square(root_vel), dim=-1)
 
@@ -138,90 +139,6 @@ def static_at_goal_exp(
     return static_reward * gate
 
 
-def _at_goal_gate(env: ManagerBasedRLEnv, command_name: str, position_threshold: float) -> torch.Tensor:
-    """Return a float mask that is 1.0 for envs that are standing or near the goal."""
-    command_term = env.command_manager.get_term(command_name)
-    is_standing = command_term.is_standing_env
-    pos_error = command_term.metrics.get("torso_position_error", None)
-    if pos_error is not None:
-        return (is_standing | (pos_error < position_threshold)).float()
-    return is_standing.float()
-
-
-def stand_still_reward(
-    env: ManagerBasedRLEnv,
-    command_name: str,
-    std_lin: float = 0.15,
-    std_ang: float = 0.5,
-    std_dist: float = 0.5,
-    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
-) -> torch.Tensor:
-    """Reward for standing still near the goal, using a product of three gaussians.
-
-    The reward is ``exp(-lin²/std_lin²) * exp(-ang²/std_ang²) * exp(-dist²/std_dist²)``,
-    providing smooth gradient everywhere. Standing envs get dist_gate = 1.0.
-
-    Use with a positive weight.
-    """
-    robot: Articulation = env.scene[asset_cfg.name]
-    command_term = env.command_manager.get_term(command_name)
-
-    # Linear velocity gaussian
-    lin_vel_sq = torch.sum(torch.square(robot.data.root_lin_vel_b), dim=-1)
-    lin_reward = torch.exp(-lin_vel_sq / (std_lin * std_lin))
-
-    # Angular velocity gaussian
-    ang_vel_sq = torch.sum(torch.square(robot.data.root_ang_vel_b), dim=-1)
-    ang_reward = torch.exp(-ang_vel_sq / (std_ang * std_ang))
-
-    # Distance gaussian (smooth gate)
-    pos_error = command_term.metrics.get("torso_position_error", None)
-    if pos_error is not None:
-        dist_gate = torch.where(
-            command_term.is_standing_env,
-            torch.ones_like(pos_error),
-            torch.exp(-torch.square(pos_error) / (std_dist * std_dist)),
-        )
-    else:
-        dist_gate = command_term.is_standing_env.float()
-
-    return lin_reward * ang_reward * dist_gate
-
-
-def feet_posture_at_goal(
-    env: ManagerBasedRLEnv,
-    command_name: str,
-    position_threshold: float = 0.1,
-    feet_asset_cfg: SceneEntityCfg = SceneEntityCfg("robot", body_names=".*ankle_roll_link"),
-    base_body_cfg: SceneEntityCfg = SceneEntityCfg("robot", body_names="pelvis"),
-) -> torch.Tensor:
-    """Penalize feet yaw deviation from pelvis when at the goal or standing still.
-
-    Use with a negative weight.
-    """
-    from agile.rl_env.mdp.rewards.aestetic_rewards import feet_yaw_mean_vs_base
-
-    gate = _at_goal_gate(env, command_name, position_threshold)
-    return feet_yaw_mean_vs_base(env, feet_asset_cfg, base_body_cfg) * gate
-
-
-def feet_distance_at_goal(
-    env: ManagerBasedRLEnv,
-    command_name: str,
-    position_threshold: float = 0.1,
-    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
-    ref_distance: float = 0.2,
-) -> torch.Tensor:
-    """Penalize feet distance deviation from reference when at the goal or standing still.
-
-    Use with a negative weight.
-    """
-    from agile.rl_env.mdp.rewards.aestetic_rewards import feet_distance_from_ref
-
-    gate = _at_goal_gate(env, command_name, position_threshold)
-    return feet_distance_from_ref(env, asset_cfg=asset_cfg, ref_distance=ref_distance, norm="l2") * gate
-
-
 def feet_touching_penalty(
     env: ManagerBasedRLEnv,
     asset_cfg: SceneEntityCfg = SceneEntityCfg("robot", body_names=".*ankle_roll_link"),
@@ -233,7 +150,7 @@ def feet_touching_penalty(
     Use with a negative weight.
     """
     robot: Articulation = env.scene[asset_cfg.name]
-    feet_pos = robot.data.body_pos_w[:, asset_cfg.body_ids]
+    feet_pos = robot.data.body_pos_w.torch[:, asset_cfg.body_ids]
     distance = torch.norm(feet_pos[:, 0] - feet_pos[:, 1], dim=1)
     return (distance < min_distance).float()
 
@@ -277,7 +194,7 @@ def nominal_posture_at_end_exp(
 
     # Get robot's current joint positions for the tracked joints
     # Shape: (num_envs, num_tracked_joints)
-    current_pos = robot.data.joint_pos[:, command.tracked_joint_ids]
+    current_pos = robot.data.joint_pos.torch[:, command.tracked_joint_ids]
 
     # Compute deviation from target posture
     deviation_sq = torch.sum(torch.square(current_pos - target_pos), dim=-1)
@@ -309,7 +226,7 @@ def track_lin_vel_xy_yaw_frame_exp_weighted_simplified(
 
     # extract the used quantities (to enable type-hinting)
     asset = env.scene[asset_cfg.name]
-    vel_yaw = quat_apply_inverse(yaw_quat(asset.data.root_quat_w), asset.data.root_lin_vel_w[:, :3])
+    vel_yaw = quat_apply_inverse(yaw_quat(asset.data.root_quat_w.torch), asset.data.root_lin_vel_w.torch[:, :3])
     command_term = env.command_manager.get_term(command_name)
     vel_cmd = command_term.vel_command_b[:, :2]
 
@@ -357,7 +274,7 @@ def track_ang_vel_z_world_exp_weighted_simplified(
 
     # Get commanded and actual angular velocities
     ang_vel_cmd = command_term.vel_command_b[:, 2]  # commanded angular velocity z
-    ang_vel_actual = asset.data.root_ang_vel_w[:, 2]  # actual angular velocity z
+    ang_vel_actual = asset.data.root_ang_vel_w.torch[:, 2]  # actual angular velocity z
 
     # Compute tracking error
     ang_vel_error = torch.square(ang_vel_cmd - ang_vel_actual)
@@ -385,6 +302,50 @@ def track_ang_vel_z_world_exp_weighted_simplified(
     return weight * torch.exp(-ang_vel_error / std**2)
 
 
+def track_ang_vel_z_world_exp(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    std: float,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> torch.Tensor:
+    """Reward tracking of angular velocity commands (yaw) in world frame using an exponential kernel."""
+    asset = env.scene[asset_cfg.name]
+    ang_vel_error = torch.square(
+        env.command_manager.get_command(command_name)[:, 2] - asset.data.root_ang_vel_w.torch[:, 2]
+    )
+    return torch.exp(-ang_vel_error / std**2)
+
+
+def track_lin_vel_xy_yaw_frame_exp(
+    env: ManagerBasedRLEnv,
+    std: float,
+    command_name: str,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> torch.Tensor:
+    """Reward tracking of linear velocity commands in the gravity-aligned yaw frame."""
+    asset = env.scene[asset_cfg.name]
+    vel_yaw = quat_apply_inverse(yaw_quat(asset.data.root_quat_w.torch), asset.data.root_lin_vel_w.torch[:, :3])
+    lin_vel_error = torch.sum(
+        torch.square(env.command_manager.get_command(command_name)[:, :2] - vel_yaw[:, :2]), dim=1
+    )
+    return torch.exp(-lin_vel_error / std**2)
+
+
+def feet_slide(
+    env: ManagerBasedRLEnv,
+    sensor_cfg: SceneEntityCfg,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> torch.Tensor:
+    """Penalize feet sliding while in contact with the ground."""
+    contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
+    contacts = (
+        contact_sensor.data.net_forces_w_history.torch[:, :, sensor_cfg.body_ids, :].norm(dim=-1).max(dim=1)[0] > 1.0
+    )
+    asset = env.scene[asset_cfg.name]
+    body_vel = asset.data.body_lin_vel_w.torch[:, asset_cfg.body_ids, :2]
+    return torch.sum(body_vel.norm(dim=-1) * contacts, dim=1)
+
+
 def track_lin_vel_xy_yaw_frame_exp_weighted(
     env: ManagerBasedRLEnv,
     command_name: str,
@@ -399,7 +360,7 @@ def track_lin_vel_xy_yaw_frame_exp_weighted(
 
     # extract the used quantities (to enable type-hinting)
     asset = env.scene[asset_cfg.name]
-    vel_yaw = quat_apply_inverse(yaw_quat(asset.data.root_quat_w), asset.data.root_lin_vel_w[:, :3])
+    vel_yaw = quat_apply_inverse(yaw_quat(asset.data.root_quat_w.torch), asset.data.root_lin_vel_w.torch[:, :3])
     command_term = env.command_manager.get_term(command_name)
     vel_cmd = command_term.vel_command_b[:, :2]
 
@@ -436,7 +397,7 @@ def track_lin_vel_xy_yaw_frame_exp_aligned(
     """
     # extract the used quantities (to enable type-hinting)
     asset = env.scene[asset_cfg.name]
-    vel_yaw = quat_apply_inverse(yaw_quat(asset.data.root_quat_w), asset.data.root_lin_vel_w[:, :3])[:, :2]
+    vel_yaw = quat_apply_inverse(yaw_quat(asset.data.root_quat_w.torch), asset.data.root_lin_vel_w.torch[:, :3])[:, :2]
     vel_cmd = env.command_manager.get_command(command_name)[:, :2]
 
     cosine_similarity = torch.nn.functional.cosine_similarity(vel_cmd, vel_yaw, dim=1)
@@ -459,7 +420,7 @@ def vel_xy_in_threshold(
 ) -> torch.Tensor:
     """Reward the agent for tracking the linear velocity."""
     asset = env.scene[asset_cfg.name]
-    vel_yaw = quat_apply_inverse(yaw_quat(asset.data.root_quat_w), asset.data.root_lin_vel_w[:, :3])[:, :2]
+    vel_yaw = quat_apply_inverse(yaw_quat(asset.data.root_quat_w.torch), asset.data.root_lin_vel_w.torch[:, :3])[:, :2]
     vel_cmd = env.command_manager.get_command(command_name)[:, :2]
 
     lin_vel_error = torch.linalg.vector_norm(vel_cmd - vel_yaw, dim=1)
@@ -487,7 +448,7 @@ def track_base_height(
     robot, _ = get_robot_cfg(env, asset_cfg)
 
     # Get base height from the robot's root state
-    base_height = robot.data.root_pos_w[:, 2]
+    base_height = robot.data.root_pos_w.torch[:, 2]
 
     # Get the command from the command manager
     command = env.command_manager.get_command(command_name)
@@ -525,7 +486,7 @@ def base_height_exp(
     else:
         # Use the provided target height directly for flat terrain
         adjusted_target_height = target_height
-    height_error = torch.square(asset.data.root_pos_w[:, 2] - adjusted_target_height)
+    height_error = torch.square(asset.data.root_pos_w.torch[:, 2] - adjusted_target_height)
     return torch.exp(-height_error / std**2)
 
 
@@ -595,7 +556,7 @@ def stand_still(
     feet_body_ids = sensor_cfg.body_ids
 
     # Get contact forces for feet
-    contact_forces = contact_sensor.data.net_forces_w[:, feet_body_ids, 2]
+    contact_forces = contact_sensor.data.net_forces_w.torch[:, feet_body_ids, 2]
 
     # Count feet without contact (contact force < threshold)
     feet_without_contact = torch.sum(contact_forces < contact_threshold, dim=-1)
@@ -609,3 +570,5 @@ def stand_still(
     reward = feet_without_contact * is_null_cmd.float()
 
     return reward
+
+

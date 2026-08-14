@@ -14,6 +14,8 @@
 # limitations under the License.
 
 
+# ruff: noqa: I001
+
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -25,10 +27,15 @@ from tensordict.tensordict import TensorDict
 
 from .observations import (
     lr_mirror_base_ang_vel,
+    lr_mirror_base_ang_vel_z,
     lr_mirror_base_lin_vel,
     lr_mirror_projected_gravity,
     mirror_base_com,
     mirror_external_force_torque,
+    mirror_feet_height,
+    mirror_feet_roll_pitch,
+    mirror_feet_yaw_vs_body,
+    mirror_flattened_observation_group,
     mirror_gait_cycle_commands,
     mirror_height_scan_feet_left_right,
     mirror_height_scan_left_right,
@@ -70,7 +77,7 @@ def lr_mirror_G1(
 
     if obs is not None:
         mirrored_obs = TensorDict(
-            {name: OBS_TO_MIRROR[name](obs[name], env) for name in obs.keys()},
+            {name: _mirror_observation(name, obs[name], env, obs_type) for name in obs.keys()},
             batch_size=obs.batch_size,
         )
         augmented_obs = torch.cat([obs, mirrored_obs], dim=0)
@@ -80,20 +87,57 @@ def lr_mirror_G1(
     return augmented_obs, augmented_actions
 
 
+def _mirror_observation(name: str, obs: torch.Tensor, env: ManagerBasedRLEnv, obs_type: str = "policy") -> torch.Tensor:
+    if name in OBS_TO_MIRROR:
+        return OBS_TO_MIRROR[name](obs, env)
+
+    if hasattr(env.unwrapped, "observation_manager") and name in env.unwrapped.observation_manager.active_terms:
+        return mirror_flattened_observation_group(obs, env, name, OBS_TO_MIRROR)
+
+    return mirror_flattened_observation_group(obs, env, obs_type, OBS_TO_MIRROR)
+
+
 def mirror_actions_G1(
     actions: torch.Tensor, env: ManagerBasedRLEnv, action_term_name: str = "joint_pos"
 ) -> torch.Tensor:
-    """Left-right mirroring of the actions. Can be a subset of the joints as defined in the action manager."""
+    """Left-right mirroring of the actions. Handles single or multiple action terms.
 
-    mirrored_indices, neg_indices = resolve_joint_names_g1(
-        tuple(env.unwrapped.action_manager._terms[action_term_name]._joint_names)
-    )
+    When the action tensor contains multiple concatenated action terms, splits by
+    action dimensions, mirrors each term independently, and concatenates back.
+    """
+    action_manager = env.unwrapped.action_manager
+    term_names = list(action_manager._terms.keys())
 
-    mirrored_actions = actions.clone()
-    mirrored_actions[..., mirrored_indices] = actions
-    mirrored_actions[..., neg_indices] *= -1
+    # Single action term or explicitly named
+    if len(term_names) == 1 or actions.shape[-1] == action_manager._terms[action_term_name].action_dim:
+        mirrored_indices, neg_indices = resolve_joint_names_g1(
+            tuple(action_manager._terms[action_term_name]._joint_names)
+        )
+        mirrored_actions = actions.clone()
+        mirrored_actions[..., mirrored_indices] = actions
+        mirrored_actions[..., neg_indices] *= -1
+        return mirrored_actions
 
-    return mirrored_actions
+    # Multiple action terms: split, mirror each, concatenate
+    mirrored_parts = []
+    offset = 0
+    for name in term_names:
+        term = action_manager._terms[name]
+        dim = term.action_dim
+        part = actions[..., offset : offset + dim]
+
+        if hasattr(term, "_joint_names"):
+            m_indices, n_indices = resolve_joint_names_g1(tuple(term._joint_names))
+            mirrored = part.clone()
+            mirrored[..., m_indices] = part
+            mirrored[..., n_indices] *= -1
+        else:
+            mirrored = part.clone()
+
+        mirrored_parts.append(mirrored)
+        offset += dim
+
+    return torch.cat(mirrored_parts, dim=-1)
 
 
 def mirror_joints_G1(actions: torch.Tensor, env: ManagerBasedRLEnv) -> torch.Tensor:
@@ -111,31 +155,14 @@ def mirror_joints_G1(actions: torch.Tensor, env: ManagerBasedRLEnv) -> torch.Ten
 
 
 def mirror_bodies_G1(bodies: torch.Tensor, env: ManagerBasedRLEnv) -> torch.Tensor:
-    """Left-right mirroring of all robot bodies."""
+    """Left-right mirroring of **all** the bodies of the unitree G1 robot."""
+
     mirrored_indices = resolve_body_names_g1(tuple(env.unwrapped.scene.articulations["robot"].body_names))
+
     mirrored_bodies = bodies.clone()
     mirrored_bodies[..., mirrored_indices] = bodies
+
     return mirrored_bodies
-
-
-@lru_cache(maxsize=10)
-def resolve_body_names_g1(body_names: tuple[str, ...]) -> list[int]:
-    """Resolve body names to mirrored body indices."""
-    mirrored_indices = []
-    for source_body_name in body_names:
-        if "left" in source_body_name:
-            mirrored_body_name = source_body_name.replace("left", "right")
-        elif "right" in source_body_name:
-            mirrored_body_name = source_body_name.replace("right", "left")
-        else:
-            mirrored_body_name = source_body_name
-
-        if mirrored_body_name not in body_names:
-            raise ValueError(f"Mirrored body name {mirrored_body_name} not found in body names")
-
-        mirrored_indices.append(body_names.index(mirrored_body_name))
-
-    return mirrored_indices
 
 
 @lru_cache(maxsize=10)
@@ -178,6 +205,34 @@ def resolve_joint_names_g1(action_joint_names: tuple[str, ...]) -> tuple[list[in
     return mirrored_indices, neg_indices
 
 
+@lru_cache(maxsize=10)
+def resolve_body_names_g1(body_names: tuple[str, ...]) -> list[int]:
+    """Resolve the body names to indices for left-right mirroring.
+
+    Args:
+        body_names: The body names of the robot.
+
+    Returns:
+        The indices of the mirrored bodies.
+    """
+
+    mirrored_indices = []
+    for source_body_name in body_names:
+        if "left" in source_body_name:
+            mirrored_body_name = source_body_name.replace("left", "right")
+        elif "right" in source_body_name:
+            mirrored_body_name = source_body_name.replace("right", "left")
+        else:
+            mirrored_body_name = source_body_name
+
+        if mirrored_body_name not in body_names:
+            raise ValueError(f"Mirrored body name {mirrored_body_name} not found in body names")
+
+        mirrored_indices.append(body_names.index(mirrored_body_name))
+
+    return mirrored_indices
+
+
 def mirror_actuator_gains(obs: torch.Tensor, env: ManagerBasedRLEnv) -> torch.Tensor:
     """Mirror the actuator gains.
 
@@ -210,9 +265,12 @@ OBS_TO_MIRROR: dict[str, Callable] = {
     "projected_gravity": lr_mirror_projected_gravity,
     "base_lin_vel": lr_mirror_base_lin_vel,
     "base_ang_vel": lr_mirror_base_ang_vel,
+    "base_ang_vel_z_world": lr_mirror_base_ang_vel_z,
+    "torso_projected_gravity": lr_mirror_projected_gravity,
     "joint_pos": mirror_joints_G1,
     "joint_vel": mirror_joints_G1,
     "actions": mirror_actions_G1,
+    "joint_pos_target": mirror_actions_G1,
     "controlled_joint_pos": mirror_actions_G1,
     "controlled_joint_vel": mirror_actions_G1,
     "velocity_commands": mirror_velocity_commands,
@@ -223,17 +281,21 @@ OBS_TO_MIRROR: dict[str, Callable] = {
     "height_scan": mirror_height_scan_left_right,
     "height_scan_feet": mirror_height_scan_feet_left_right,
     "base_height": identity,
-    "contact_forces": mirror_bodies_G1,
     "external_force_torque": mirror_external_force_torque,
     "base_com": mirror_base_com,
     "actuator_gains": mirror_actuator_gains,
     "joint_parameters": mirror_joint_parameters,
     "base_mass": identity,
+    "torso_mass": identity,
     "joint_pos_upper": mirror_joints_G1,
     "joint_pos_lower": mirror_joints_G1,
     "joint_vel_upper": mirror_joints_G1,
     "joint_vel_lower": mirror_joints_G1,
     "last_actions_upper": mirror_joints_G1,
     "last_actions_lower": mirror_joints_G1,
+    "contact_forces": mirror_bodies_G1,
+    "feet_height": mirror_feet_height,
+    "feet_roll_pitch": mirror_feet_roll_pitch,
+    "feet_yaw_vs_pelvis": mirror_feet_yaw_vs_body,
 }
 """Mapping of observation names to functions to mirror the observations."""

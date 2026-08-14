@@ -16,6 +16,7 @@
 # limitations under the License.
 import abc
 import argparse
+import hashlib
 import json
 import os
 import pathlib
@@ -57,6 +58,7 @@ class RunConfig:
     train_workflow: pathlib.Path
     eval_workflow: pathlib.Path
     sweep_workflow: pathlib.Path
+    eval_pipeline_workflow: pathlib.Path | None = None
 
     @classmethod
     def load_from_path(cls, path: pathlib.Path) -> "RunConfig":
@@ -75,6 +77,7 @@ class RunConfig:
             "train_workflow": data["paths"]["train_workflow"],
             "eval_workflow": data["paths"]["eval_workflow"],
             "sweep_workflow": data["paths"]["sweep_workflow"],
+            "eval_pipeline_workflow": data["paths"].get("eval_pipeline_workflow"),
         }
 
         config = cls(**flattened)
@@ -85,6 +88,11 @@ class RunConfig:
         config.train_workflow = path.parent / config.train_workflow
         config.eval_workflow = path.parent / config.eval_workflow
         config.sweep_workflow = path.parent / config.sweep_workflow
+        if config.eval_pipeline_workflow is not None:
+            config.eval_pipeline_workflow = path.parent / config.eval_pipeline_workflow
+        else:
+            # Default to e2e_eval_workflow.yaml next to run_config.yaml
+            config.eval_pipeline_workflow = path.parent / "e2e_eval_workflow.yaml"
 
         return config
 
@@ -296,6 +304,10 @@ def build_docker_image(
 
     print(f"Building docker container: {image_name}")
     print(f"Resume checkpoint path: {resume_checkpoint_path}")
+    # The Dockerfile relies on BuildKit-only features (uv cache mounts, COPY
+    # --exclude). Modern Docker enables BuildKit by default, but set it
+    # explicitly so the build does not silently fall back to the legacy builder.
+    os.environ.setdefault("DOCKER_BUILDKIT", "1")
     command = [
         "docker",
         "build",
@@ -321,7 +333,7 @@ def build_docker_image(
         eval_checkpoint_dir = SCRIPT_DIR / "agile" / "data" / "policy" / "eval"
         eval_checkpoint_dir.mkdir(parents=True, exist_ok=True)
 
-        eval_checkpoint = eval_checkpoint_dir / resolved_checkpoint.name
+        eval_checkpoint = eval_checkpoint_dir / _checkpoint_bundle_name(resolved_checkpoint)
         shutil.copy2(resolved_checkpoint, eval_checkpoint)
         print(f"Bundling checkpoint: {resolved_checkpoint.name}")
 
@@ -339,15 +351,33 @@ def build_docker_image(
     return image_name
 
 
-def submit_osmo_workflow(workflow_file: pathlib.Path, set_args: list[str], pool: str):
+def _checkpoint_bundle_name(checkpoint_path: pathlib.Path) -> str:
+    """Give a bundled checkpoint a content-addressed name.
+
+    OSMO image builds share a staging directory.  A basename-only copy can otherwise reuse an
+    earlier checkpoint from a different source path, so retain the readable basename after a
+    digest of the actual file bytes.
+    """
+    digest = hashlib.sha256()
+    with checkpoint_path.open("rb") as checkpoint:
+        for chunk in iter(lambda: checkpoint.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return f"{digest.hexdigest()[:16]}-{checkpoint_path.name}"
+
+
+def submit_osmo_workflow(workflow_file: pathlib.Path, set_args: list[str], pool: str, priority: str | None = None):
     command = [
         "osmo",
         "workflow",
         "submit",
         str(workflow_file),
         f"--pool={pool}",
-        "--set",
-    ] + set_args
+    ]
+    if priority:
+        command.append(f"--priority={priority}")
+    if set_args:
+        command.append("--set")
+        command += set_args
     run(command)
 
 
@@ -397,6 +427,7 @@ def handle_train(
     logger: str = "wandb",
     seeds: list[int] | None = None,
     max_iterations: int = 30000,
+    priority: str | None = None,
     set_args: list[str] = None,
     image_lookup_name: str | None = None,
 ):
@@ -416,6 +447,7 @@ def handle_train(
                 rebuild=rebuild,
                 logger=logger,
                 max_iterations=max_iterations,
+                priority=priority,
                 set_args=seed_set_args,
                 image_lookup_name=image_lookup_name or name,  # Use provided key or original name
             )
@@ -430,6 +462,7 @@ def handle_train(
             rebuild=rebuild,
             logger=logger,
             max_iterations=max_iterations,
+            priority=priority,
             set_args=set_args,
             image_lookup_name=image_lookup_name,
         )
@@ -445,6 +478,7 @@ def handle_train_single(
     rebuild: bool = False,
     logger: str = "wandb",
     max_iterations: int = 30000,
+    priority: str | None = None,
     set_args: list[str] = None,
     image_lookup_name: str | None = None,
 ):
@@ -498,6 +532,7 @@ def handle_train_single(
         ]
         + set_args,
         pool=run_config.osmo_pools["train"],
+        priority=priority,
     )
 
 
@@ -542,8 +577,8 @@ def handle_sweep(
 def add_wandb_args(set_args: list[str], wandb_team_name: str):
     set_args.extend(
         [
-            f"wandb_pass={os.environ.get('WANDB_API_KEY', '')}",
-            f"wandb_username={wandb_team_name}",
+            f"wandb_api_key={os.environ.get('WANDB_API_KEY', '')}",
+            f"wandb_user={wandb_team_name}",
         ]
     )
     return set_args
@@ -594,24 +629,24 @@ def handle_eval(
         # Evaluate latest checkpoint from a wandb training run
         python run.py eval --name eval_test \\
             --wandb_run nvidia-isaac/Locomotion-G1-29DoF-v0/runs/hk87x2ms?nw=nwuserhuihuaz \\
-            --task_name Velocity-Height-G1-Dev-v0
+            --task_name Velocity-Height-G1-History-v0
 
         # Evaluate specific checkpoints
         python run.py eval --name multi_checkpoint \\
             --wandb_run nvidia-isaac/Locomotion-G1-29DoF-v0/runs/hk87x2ms \\
-            --task_name Velocity-Height-G1-Dev-v0 \\
+            --task_name Velocity-Height-G1-History-v0 \\
             --checkpoints 5000,10000,15000
 
         # Use custom evaluation scenario
         python run.py eval --name custom_test \\
             --wandb_run nvidia-isaac/Locomotion-G1-29DoF-v0/runs/hk87x2ms \\
-            --task_name Velocity-Height-G1-Dev-v0 \\
+            --task_name Velocity-Height-G1-History-v0 \\
             --eval_config agile/algorithms/evaluation/configs/examples/multi_env_capability_test.yaml
 
         # Evaluate local checkpoint
         python run.py eval --name eval_local \\
             --checkpoint_path /path/to/model_5000.pt \\
-            --task_name Velocity-Height-G1-Dev-v0
+            --task_name Velocity-Height-G1-History-v0
     """
     # Validate input arguments
     if wandb_run_path is None and checkpoint_path is None:
@@ -764,6 +799,117 @@ def handle_eval(
     print("Monitor at: https://osmo.nvidia.com/workflows")
 
 
+def handle_eval_pipeline(
+    name: str,
+    task_name: str,
+    wandb_run: str | None,
+    wandb_iteration: int | None,
+    wandb_checkpoint_file: str | None,
+    wandb_artifact_version: str | None,
+    checkpoint_path: str | None,
+    run_label: str,
+    mjcf: str,
+    evaluation_spec: str | None,
+    use_existing: bool,
+    rebuild: bool,
+    priority: str | None,
+    set_args: list[str],
+    run_config: RunConfig,
+    image_key: str | None = None,
+):
+    """Submit an e2e eval-pipeline workflow (eval + sim2sim + report) to OSMO.
+
+    Mirrors the train subcommand: builds/reuses the Docker image, then calls
+    submit_osmo_workflow with the e2e_eval_workflow.yaml.
+
+    Args:
+        name: Workflow name suffix (full name becomes agile_eval_pipeline_{name})
+        task_name: Task ID, e.g. Velocity-Height-G1-History-v0
+        wandb_run: W&B run path to download latest checkpoint from (mutually exclusive with checkpoint_path)
+        checkpoint_path: Local .pt checkpoint path (mutually exclusive with wandb_run)
+        mjcf: Path to MuJoCo MJCF scene file inside the container
+        use_existing: Reuse existing Docker image if available
+        rebuild: Force rebuild of Docker image
+        priority: OSMO workflow priority (LOW, NORMAL, HIGH)
+        set_args: Additional key=value pairs forwarded to the workflow
+        run_config: RunConfig with image/workflow/pool paths
+        image_key: Optional key for image lookup/storage (defaults to name)
+    """
+    if wandb_run is None and checkpoint_path is None:
+        raise ValueError("Either --wandb_run or --checkpoint_path must be provided")
+    if wandb_run is not None and checkpoint_path is not None:
+        raise ValueError("Cannot use both --wandb_run and --checkpoint_path simultaneously")
+    selectors = [wandb_iteration, wandb_checkpoint_file, wandb_artifact_version]
+    if wandb_run is not None and sum(selector is not None for selector in selectors) != 1:
+        raise ValueError(
+            "--wandb_run requires exactly one selector: --wandb-iteration, --wandb-checkpoint-file, or "
+            "--wandb-artifact-version"
+        )
+    if checkpoint_path is not None and any(selector is not None for selector in selectors):
+        raise ValueError("W&B checkpoint selectors require --wandb_run")
+
+    bundled_checkpoint: pathlib.Path | None = None
+    if checkpoint_path is not None:
+        checkpoints = get_checkpoints([checkpoint_path], run_config)
+        if len(checkpoints) != 1:
+            raise ValueError(f"Expected one local evaluation checkpoint, got {len(checkpoints)}")
+        bundled_checkpoint = checkpoints[0]
+
+    full_name = f"agile_eval_pipeline_{name}"
+    lookup_key = image_key or name
+
+    # Handle image selection/building
+    image_name = None
+    if use_existing and not rebuild:
+        existing_image = get_existing_image(lookup_key)
+        if existing_image:
+            print(f"Using existing image: {existing_image}")
+            image_name = existing_image
+        else:
+            print(f"No existing image found for '{lookup_key}', building new image...")
+
+    if image_name is None or rebuild:
+        image_name = build_docker_image(run_config=run_config, resume_checkpoint_path=bundled_checkpoint)
+        store_image_mapping(lookup_key, image_name)
+        print(f"Stored image mapping: {lookup_key} -> {image_name}")
+
+    # Build workflow --set arguments
+    workflow_set_args = [
+        f"workflow_name={full_name}",
+        f"image={image_name}",
+        f"omni_server={run_config.omni_server_url}",
+        f"image_default={run_config.image_name}:latest",
+        f"task_name={task_name}",
+        f"run_label={run_label}",
+        f"mjcf={mjcf}",
+    ]
+    if evaluation_spec is not None:
+        workflow_set_args.append(f"evaluation_spec={evaluation_spec}")
+    if wandb_run is not None:
+        workflow_set_args.append(f"wandb_run={wandb_run}")
+        if wandb_iteration is not None:
+            workflow_set_args.append(f"wandb_iteration={wandb_iteration}")
+        elif wandb_checkpoint_file is not None:
+            workflow_set_args.append(f"wandb_checkpoint_file={wandb_checkpoint_file}")
+        else:
+            workflow_set_args.append(f"wandb_artifact_version={wandb_artifact_version}")
+    else:
+        assert bundled_checkpoint is not None
+        bundled_name = _checkpoint_bundle_name(bundled_checkpoint.resolve())
+        workflow_set_args.append(f"checkpoint_path=/workspace/agile/policy/resume/{bundled_name}")
+
+    workflow_set_args += set_args
+
+    submit_osmo_workflow(
+        run_config.eval_pipeline_workflow,
+        workflow_set_args,
+        pool=run_config.osmo_pools.get("eval", next(iter(run_config.osmo_pools.values()))),
+        priority=priority,
+    )
+    print(f"✓ Submitted {full_name}")
+    print("Monitor at: https://osmo.nvidia.com/workflows")
+
+
 def main():
     parser = argparse.ArgumentParser(description="CLI tool for training, evaluating, and collecting results.")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -831,8 +977,14 @@ def main():
         "--max_iterations",
         "-m",
         type=int,
-        default=20000,
-        help="Maximum number of training iterations. Defaults to 30000.",
+        default=50000,
+        help="Maximum number of training iterations. Defaults to 50000.",
+    )
+    train_parser.add_argument(
+        "--priority",
+        type=str,
+        default=None,
+        help="Osmo workflow priority (e.g., LOW, NORMAL, HIGH).",
     )
     train_parser.add_argument(
         "--image-key",
@@ -883,6 +1035,87 @@ def main():
         help="Use this to pass additional arguments to the OSMO workflow in the form key=value.",
     )
 
+    # Eval-pipeline subcommand
+    eval_pipeline_parser = subparsers.add_parser(
+        "eval-pipeline",
+        help="Run the Phase-2 e2e eval pipeline (eval + sim2sim + report) on OSMO.",
+    )
+    eval_pipeline_parser.add_argument(
+        "--name",
+        "-n",
+        required=True,
+        help="Name of the eval-pipeline experiment (used as workflow name suffix).",
+    )
+    eval_pipeline_parser.add_argument(
+        "--task",
+        "--task_name",
+        "-t",
+        required=True,
+        dest="task_name",
+        help="Task ID, e.g. Velocity-Height-G1-History-v0.",
+    )
+    eval_pipeline_src = eval_pipeline_parser.add_mutually_exclusive_group(required=True)
+    eval_pipeline_src.add_argument(
+        "--wandb_run",
+        "-w",
+        default=None,
+        help="W&B run path to download latest checkpoint from (team/project/run_id).",
+    )
+    eval_pipeline_parser.add_argument(
+        "--wandb-iteration", type=int, default=None, help="Exact model_<iteration>.pt within --wandb-run."
+    )
+    eval_pipeline_parser.add_argument(
+        "--wandb-checkpoint-file", default=None, help="Exact checkpoint file within --wandb-run."
+    )
+    eval_pipeline_parser.add_argument(
+        "--wandb-artifact-version", default=None, help="Immutable W&B artifact reference within --wandb-run."
+    )
+    eval_pipeline_src.add_argument(
+        "--checkpoint",
+        "--checkpoint_path",
+        dest="checkpoint_path",
+        default=None,
+        help="Path to a local .pt checkpoint. " + CHECKPOINT_FORMAT_DESCRIPTION,
+    )
+    eval_pipeline_parser.add_argument(
+        "--mjcf",
+        required=True,
+        help="Path to the MuJoCo MJCF scene file (inside the container).",
+    )
+    eval_pipeline_parser.add_argument("--run-label", required=True, help="Unique evaluation-run label.")
+    eval_pipeline_parser.add_argument(
+        "--evaluation-spec", default=None, help="Task evaluation specification override inside the image."
+    )
+    eval_pipeline_parser.add_argument(
+        "--use-existing",
+        action="store_true",
+        help="Use existing Docker image for this experiment name if available, otherwise build new one.",
+    )
+    eval_pipeline_parser.add_argument(
+        "--rebuild",
+        action="store_true",
+        help="Force rebuild of Docker image even if existing one is available.",
+    )
+    eval_pipeline_parser.add_argument(
+        "--priority",
+        type=str,
+        default=None,
+        help="OSMO workflow priority (e.g., LOW, NORMAL, HIGH).",
+    )
+    eval_pipeline_parser.add_argument(
+        "--image-key",
+        type=str,
+        default=None,
+        help="Key to use for image lookup/storage instead of experiment name.",
+    )
+    eval_pipeline_parser.add_argument(
+        "--set",
+        type=str,
+        default=[],
+        nargs="+",
+        help="Additional arguments to pass to OSMO workflow (key=value format).",
+    )
+
     # Eval subcommand
     eval_parser = subparsers.add_parser(
         "eval",
@@ -924,7 +1157,7 @@ def main():
         "--task_name",
         "-t",
         required=True,
-        help="Task name (must match the task used in training, e.g., Velocity-Height-G1-Dev-v0).",
+        help="Task name (must match the task used in training, e.g., Velocity-Height-G1-History-v0).",
     )
     eval_parser.add_argument(
         "--project_name",
@@ -997,6 +1230,7 @@ def main():
             logger=args.logger,
             seeds=[s for sublist in args.seeds for s in sublist] if args.seeds else None,
             max_iterations=args.max_iterations,
+            priority=args.priority,
             set_args=set_args,
             run_config=run_config,
             image_lookup_name=args.image_key,
@@ -1023,6 +1257,25 @@ def main():
             rebuild=args.rebuild,
             set_args=set_args,
             run_config=run_config,
+        )
+    elif args.command == "eval-pipeline":
+        handle_eval_pipeline(
+            name=args.name,
+            task_name=args.task_name,
+            wandb_run=args.wandb_run,
+            wandb_iteration=args.wandb_iteration,
+            wandb_checkpoint_file=args.wandb_checkpoint_file,
+            wandb_artifact_version=args.wandb_artifact_version,
+            checkpoint_path=args.checkpoint_path,
+            run_label=args.run_label,
+            mjcf=args.mjcf,
+            evaluation_spec=args.evaluation_spec,
+            use_existing=args.use_existing,
+            rebuild=args.rebuild,
+            priority=args.priority,
+            set_args=set_args,
+            run_config=run_config,
+            image_key=args.image_key,
         )
 
 

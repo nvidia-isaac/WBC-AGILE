@@ -17,7 +17,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from functools import lru_cache
+from math import prod
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -25,6 +27,35 @@ import torch
 
 if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedRLEnv
+
+
+def mirror_flattened_observation_group(
+    obs: torch.Tensor,
+    env: ManagerBasedRLEnv,
+    obs_type: str,
+    obs_to_mirror: dict[str, Callable],
+) -> torch.Tensor:
+    """Mirror a flattened Isaac Lab observation group term by term."""
+    obs_manager = env.unwrapped.observation_manager
+    term_names = obs_manager.active_terms[obs_type]
+    term_dims = obs_manager.group_obs_term_dim[obs_type]
+
+    mirrored_terms = []
+    offset = 0
+    for term_name, term_shape in zip(term_names, term_dims, strict=True):
+        flat_dim = prod(term_shape)
+        term_obs = obs[..., offset : offset + flat_dim].reshape(*obs.shape[:-1], *term_shape)
+        mirrored_term = obs_to_mirror[term_name](term_obs, env).reshape(*obs.shape[:-1], flat_dim)
+        mirrored_terms.append(mirrored_term)
+        offset += flat_dim
+
+    if offset != obs.shape[-1]:
+        raise ValueError(
+            f"Flattened observation group '{obs_type}' has dimension {obs.shape[-1]}, but term dimensions sum to "
+            f"{offset}."
+        )
+
+    return torch.cat(mirrored_terms, dim=-1)
 
 
 def mirror_velocity_commands(actions: torch.Tensor, env: ManagerBasedRLEnv) -> torch.Tensor:  # noqa: ARG001
@@ -68,6 +99,14 @@ def lr_mirror_base_ang_vel(obs: torch.Tensor, env: ManagerBasedRLEnv) -> torch.T
     mirrored_obs[..., 0] = -obs[..., 0]
     mirrored_obs[..., 2] = -obs[..., 2]
     return mirrored_obs
+
+
+def lr_mirror_base_ang_vel_z(obs: torch.Tensor, env: ManagerBasedRLEnv) -> torch.Tensor:  # noqa: ARG001
+    """Left-right mirroring of the world-frame yaw rate (z angular velocity).
+
+    obs has shape (..., 1)
+    """
+    return -obs
 
 
 def mirror_height_scan_left_right(obs: torch.Tensor, env: ManagerBasedRLEnv) -> torch.Tensor:
@@ -179,3 +218,35 @@ def mirror_base_com(obs: torch.Tensor, env: ManagerBasedRLEnv) -> torch.Tensor: 
     mirrored_obs = obs.clone()
     mirrored_obs[..., 1] = -obs[..., 1]
     return mirrored_obs
+
+
+def mirror_feet_height(obs: torch.Tensor, env: ManagerBasedRLEnv) -> torch.Tensor:  # noqa: ARG001
+    """Swap left and right foot heights.
+
+    obs has shape (..., 2) — [left, right].
+    """
+    return torch.stack([obs[..., 1], obs[..., 0]], dim=-1)
+
+
+def mirror_feet_roll_pitch(obs: torch.Tensor, env: ManagerBasedRLEnv) -> torch.Tensor:  # noqa: ARG001
+    """Swap left/right feet and negate roll.
+
+    obs has shape (..., 4) — [roll_L, pitch_L, roll_R, pitch_R].
+    """
+    mirrored_obs = obs.clone()
+    # swap left and right
+    mirrored_obs[..., 0] = -obs[..., 2]  # roll_R negated
+    mirrored_obs[..., 1] = obs[..., 3]  # pitch_R
+    mirrored_obs[..., 2] = -obs[..., 0]  # roll_L negated
+    mirrored_obs[..., 3] = obs[..., 1]  # pitch_L
+    return mirrored_obs
+
+
+def mirror_feet_yaw_vs_body(obs: torch.Tensor, env: ManagerBasedRLEnv) -> torch.Tensor:  # noqa: ARG001
+    """Swap left/right feet yaw and negate.
+
+    obs has shape (..., 2) — [yaw_L, yaw_R].
+    """
+    return torch.stack([-obs[..., 1], -obs[..., 0]], dim=-1)
+
+

@@ -23,11 +23,12 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Literal
 
 import torch
+import warp as wp
 
 import isaaclab.utils.math as math_utils
 from isaaclab.assets import Articulation
 from isaaclab.terrains import TerrainImporter
-from isaaclab.utils import configclass
+from isaaclab.utils.configclass import configclass
 
 if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedRLEnv
@@ -213,8 +214,6 @@ class FallenStateDataset:
         # Disable terminations during collection to allow full falls without interruption
         env._disable_terminations = True
 
-        # Pre-allocate env ids for joint disabling
-        all_env_ids = torch.arange(env.num_envs, device=env.device)
         decimation = env.cfg.decimation
 
         try:
@@ -239,8 +238,8 @@ class FallenStateDataset:
                         # Step simulation with disabled joints
                         for _ in range(decimation):
                             # Zero out joint efforts before physics (same as disable_joints event)
-                            robot._joint_effort_target_sim[:] = 0.0
-                            robot.root_physx_view.set_dof_actuation_forces(robot._joint_effort_target_sim, all_env_ids)
+                            wp.to_torch(robot._joint_effort_target_sim)[:] = 0.0
+                            robot.root_view.set_dof_actuation_forces(robot._joint_effort_target_sim, robot._ALL_INDICES)
                             # Step physics with rendering enabled
                             env.sim.step()
 
@@ -279,7 +278,7 @@ class FallenStateDataset:
             if not self._is_flat_terrain:
                 terrain.terrain_levels[:] = 0
             # Re-enable rendering by doing a render step
-            if env.sim.has_gui():
+            if env.sim.has_gui:
                 env.sim.render()
 
     def _reset_envs_to_terrain_cells(self, env: ManagerBasedRLEnv, level: int) -> None:
@@ -311,7 +310,7 @@ class FallenStateDataset:
             env.scene.env_origins[:] = env_origins
 
         # Sample initial poses for falling
-        root_states = robot.data.default_root_state.clone()
+        root_states = robot.data.default_root_state.torch.clone()
         env_ids = torch.arange(num_envs, device=env.device)
 
         # Set orientation based on spawn mode
@@ -365,12 +364,12 @@ class FallenStateDataset:
         # Set joint state based on spawn mode
         if self.cfg.spawn_joint_mode == "default":
             robot.write_joint_state_to_sim(
-                robot.data.default_joint_pos.clone(),
-                robot.data.default_joint_vel.clone(),
+                robot.data.default_joint_pos.torch.clone(),
+                robot.data.default_joint_vel.torch.clone(),
                 env_ids=env_ids,
             )
         else:
-            joint_pos_limits = robot.data.soft_joint_pos_limits
+            joint_pos_limits = robot.data.soft_joint_pos_limits.torch
             joint_pos = torch.rand(num_envs, robot.num_joints, device=env.device)
             joint_pos = joint_pos * (joint_pos_limits[:, :, 1] - joint_pos_limits[:, :, 0]) + joint_pos_limits[:, :, 0]
             joint_vel = (torch.rand(num_envs, robot.num_joints, device=env.device) * 2 - 1) * 1.0
@@ -402,7 +401,7 @@ class FallenStateDataset:
             env.scene.env_origins[env_id] = env_origin
 
         # Sample new initial pose
-        root_state = robot.data.default_root_state[env_id].clone()
+        root_state = robot.data.default_root_state.torch[env_id].clone()
 
         # Set orientation based on spawn mode
         if self.cfg.spawn_orientation == "on_back":
@@ -451,12 +450,12 @@ class FallenStateDataset:
         # Set joint state based on spawn mode
         if self.cfg.spawn_joint_mode == "default":
             robot.write_joint_state_to_sim(
-                robot.data.default_joint_pos[env_id].unsqueeze(0),
-                robot.data.default_joint_vel[env_id].unsqueeze(0),
+                robot.data.default_joint_pos.torch[env_id].unsqueeze(0),
+                robot.data.default_joint_vel.torch[env_id].unsqueeze(0),
                 env_ids=env_ids_tensor,
             )
         else:
-            joint_pos_limits = robot.data.soft_joint_pos_limits[env_id]
+            joint_pos_limits = robot.data.soft_joint_pos_limits.torch[env_id]
             joint_pos = torch.rand(robot.num_joints, device=device)
             joint_pos = joint_pos * (joint_pos_limits[:, 1] - joint_pos_limits[:, 0]) + joint_pos_limits[:, 0]
             joint_vel = (torch.rand(robot.num_joints, device=device) * 2 - 1) * 1.0
@@ -474,10 +473,10 @@ class FallenStateDataset:
         robot: Articulation = env.scene["robot"]
 
         # Get current state
-        root_pos_w = robot.data.root_pos_w
-        root_lin_vel = robot.data.root_lin_vel_w
-        root_ang_vel = robot.data.root_ang_vel_w
-        joint_vel = robot.data.joint_vel
+        root_pos_w = robot.data.root_pos_w.torch
+        root_lin_vel = robot.data.root_lin_vel_w.torch
+        root_ang_vel = robot.data.root_ang_vel_w.torch
+        joint_vel = robot.data.joint_vel.torch
 
         # Check height above spawn position (env_origin + spawn_height_offset)
         spawn_height = env.scene.env_origins[:, 2] + self.cfg.spawn_height_offset
@@ -506,10 +505,10 @@ class FallenStateDataset:
         robot: Articulation = env.scene["robot"]
 
         # Get current root state
-        root_pos_w = robot.data.root_pos_w.clone()  # world position
-        root_quat = robot.data.root_quat_w.clone()
-        root_lin_vel = robot.data.root_lin_vel_w.clone()
-        root_ang_vel = robot.data.root_ang_vel_w.clone()
+        root_pos_w = robot.data.root_pos_w.torch.clone()  # world position
+        root_quat = robot.data.root_quat_w.torch.clone()
+        root_lin_vel = robot.data.root_lin_vel_w.torch.clone()
+        root_ang_vel = robot.data.root_ang_vel_w.torch.clone()
 
         # Convert position to relative (relative to env origin / terrain origin)
         root_pos_rel = root_pos_w - env.scene.env_origins
@@ -522,8 +521,8 @@ class FallenStateDataset:
             root_pos_rel[:, 1] = torch.clamp(root_pos_rel[:, 1], -half_size_y, half_size_y)
 
         # Get joint states
-        joint_pos = robot.data.joint_pos.clone()
-        joint_vel = robot.data.joint_vel.clone()
+        joint_pos = robot.data.joint_pos.torch.clone()
+        joint_vel = robot.data.joint_vel.torch.clone()
 
         # Get terrain type for each env (0 for flat terrain)
         if self._is_flat_terrain:

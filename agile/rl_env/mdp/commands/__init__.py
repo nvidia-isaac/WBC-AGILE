@@ -26,8 +26,10 @@ from .commands_cfg import (
     UniformVelocityBaseHeightCommandCfg,
     UniformVelocityGaitBaseHeightCommandCfg,
 )
+
 from .height_command import SmoothHeightCommand
 from .height_command_cfg import SmoothHeightCommandCfg
+
 from .motion_tracking_commands import MotionCommand
 from .motion_tracking_commands_cfg import MotionCommandCfg
 from .tracking_commands import TrackingCommand
@@ -40,11 +42,11 @@ __all__ = [
     "UniformVelocityBaseHeightCommandCfg",
     "UniformVelocityGaitBaseHeightCommand",
     "UniformVelocityGaitBaseHeightCommandCfg",
-    "SmoothHeightCommand",
-    "SmoothHeightCommandCfg",
     "TrackingCommand",
     "TrackingCommandCfg",
     "MotionCommand",
     "MotionCommandCfg",
+    "SmoothHeightCommand",
+    "SmoothHeightCommandCfg",
     "MotionData",
 ]

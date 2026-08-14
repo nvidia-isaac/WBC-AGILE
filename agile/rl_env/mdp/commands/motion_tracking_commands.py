@@ -53,7 +53,7 @@ class MotionCommand(CommandTerm):
         self.robot_anchor_body_index = self.robot.body_names.index(self.cfg.anchor_body_name)
         self.motion_anchor_body_index = self.cfg.body_names.index(self.cfg.anchor_body_name)
 
-        # Robot body indices -- used to read robot.data.body_pos_w etc.
+        # Robot body indices -- used to read robot.data.body_pos_w.torch etc.
         self.body_indices = torch.tensor(
             self.robot.find_bodies(self.cfg.body_names, preserve_order=True)[0], dtype=torch.long, device=self.device
         )
@@ -76,12 +76,13 @@ class MotionCommand(CommandTerm):
             body_indices=npz_body_indices,
             joint_remap_idx=joint_remap_idx,
             device=self.device,
+            quat_xyzw=True,  # Isaac Lab 3.0 uses (x, y, z, w); motion files are (w, x, y, z).
         )
 
         self.time_steps = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
         self.body_pos_relative_w = torch.zeros(self.num_envs, len(cfg.body_names), 3, device=self.device)
         self.body_quat_relative_w = torch.zeros(self.num_envs, len(cfg.body_names), 4, device=self.device)
-        self.body_quat_relative_w[:, :, 0] = 1.0
+        self.body_quat_relative_w[:, :, 3] = 1.0  # identity quaternion (x, y, z, w)
 
         self.bin_count = int(self.motion.time_step_total // (1 / (env.cfg.decimation * env.cfg.sim.dt))) + 1
         self.bin_failed_count = torch.zeros(self.bin_count, dtype=torch.float, device=self.device)
@@ -149,43 +150,43 @@ class MotionCommand(CommandTerm):
 
     @property
     def robot_joint_pos(self) -> torch.Tensor:
-        return self.robot.data.joint_pos
+        return self.robot.data.joint_pos.torch
 
     @property
     def robot_joint_vel(self) -> torch.Tensor:
-        return self.robot.data.joint_vel
+        return self.robot.data.joint_vel.torch
 
     @property
     def robot_body_pos_w(self) -> torch.Tensor:
-        return self.robot.data.body_pos_w[:, self.body_indices]
+        return self.robot.data.body_pos_w.torch[:, self.body_indices]
 
     @property
     def robot_body_quat_w(self) -> torch.Tensor:
-        return self.robot.data.body_quat_w[:, self.body_indices]
+        return self.robot.data.body_quat_w.torch[:, self.body_indices]
 
     @property
     def robot_body_lin_vel_w(self) -> torch.Tensor:
-        return self.robot.data.body_lin_vel_w[:, self.body_indices]
+        return self.robot.data.body_lin_vel_w.torch[:, self.body_indices]
 
     @property
     def robot_body_ang_vel_w(self) -> torch.Tensor:
-        return self.robot.data.body_ang_vel_w[:, self.body_indices]
+        return self.robot.data.body_ang_vel_w.torch[:, self.body_indices]
 
     @property
     def robot_anchor_pos_w(self) -> torch.Tensor:
-        return self.robot.data.body_pos_w[:, self.robot_anchor_body_index]
+        return self.robot.data.body_pos_w.torch[:, self.robot_anchor_body_index]
 
     @property
     def robot_anchor_quat_w(self) -> torch.Tensor:
-        return self.robot.data.body_quat_w[:, self.robot_anchor_body_index]
+        return self.robot.data.body_quat_w.torch[:, self.robot_anchor_body_index]
 
     @property
     def robot_anchor_lin_vel_w(self) -> torch.Tensor:
-        return self.robot.data.body_lin_vel_w[:, self.robot_anchor_body_index]
+        return self.robot.data.body_lin_vel_w.torch[:, self.robot_anchor_body_index]
 
     @property
     def robot_anchor_ang_vel_w(self) -> torch.Tensor:
-        return self.robot.data.body_ang_vel_w[:, self.robot_anchor_body_index]
+        return self.robot.data.body_ang_vel_w.torch[:, self.robot_anchor_body_index]
 
     def _update_metrics(self) -> None:
         self.metrics["error_anchor_pos"] = torch.norm(self.command_anchor_pos_w - self.robot_anchor_pos_w, dim=-1)
@@ -276,7 +277,7 @@ class MotionCommand(CommandTerm):
         joint_vel = self.joint_vel.clone()
 
         joint_pos += sample_uniform(*self.cfg.joint_position_range, joint_pos.shape, joint_pos.device)
-        soft_joint_pos_limits = self.robot.data.soft_joint_pos_limits[env_ids]
+        soft_joint_pos_limits = self.robot.data.soft_joint_pos_limits.torch[env_ids]
         joint_pos[env_ids] = torch.clip(
             joint_pos[env_ids], soft_joint_pos_limits[:, :, 0], soft_joint_pos_limits[:, :, 1]
         )

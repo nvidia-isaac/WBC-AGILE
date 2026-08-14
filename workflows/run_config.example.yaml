@@ -33,4 +33,5 @@ paths:
   workflows_dir: .
   train_workflow: ./train_workflow.yaml
   eval_workflow: ./eval_workflow.yaml
+  eval_pipeline_workflow: ./e2e_eval_workflow.yaml
   sweep_workflow: ./sweep_workflow.yaml

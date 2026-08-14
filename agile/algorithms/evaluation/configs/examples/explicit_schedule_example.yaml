@@ -2,7 +2,7 @@
 # Demonstrates using explicit time-based schedule instead of sweep
 # Useful for complex, non-uniform command sequences
 evaluation:
-  task_name: "Velocity-Height-G1-Dev-v0"
+  task_name: "Velocity-Height-G1-History-v0"
   num_envs: 1
   episode_length_s: 30.0
   num_episodes: 1

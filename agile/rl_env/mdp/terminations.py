@@ -23,7 +23,7 @@ from isaaclab.managers import EventTermCfg, ManagerTermBase, SceneEntityCfg
 from isaaclab.sensors import ContactSensor, RayCaster
 from isaaclab.utils.math import subtract_frame_transforms
 
-from agile.rl_env.mdp.utils import get_robot_cfg
+from agile.rl_env.mdp.utils import get_body_velocities_and_forces, get_contact_sensor_cfg, get_robot_cfg
 
 
 def ground_slam(
@@ -64,7 +64,7 @@ def ground_slam(
 
     contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
 
-    net_contact_forces = contact_sensor.data.net_forces_w_history
+    net_contact_forces = contact_sensor.data.net_forces_w_history.torch
     in_contact = (
         torch.max(torch.norm(net_contact_forces[:, :, sensor_cfg.body_ids], dim=-1), dim=1)[0] > force_threshold
     )
@@ -89,10 +89,10 @@ def illegal_ground_contact(
     """Terminate when the contact force exceeds the force threshold and the asset is below the min_height."""
     # extract the used quantities (to enable type-hinting)
     contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
-    net_contact_forces = contact_sensor.data.net_forces_w_history
+    net_contact_forces = contact_sensor.data.net_forces_w_history.torch
     # check if any contact force exceeds the threshold
 
-    asset_height = torch.min(env.scene[asset_cfg.name].data.body_pos_w[:, asset_cfg.body_ids, 2], dim=1)[0]
+    asset_height = torch.min(env.scene[asset_cfg.name].data.body_pos_w.torch[:, asset_cfg.body_ids, 2], dim=1)[0]
     on_ground = asset_height < min_height
 
     in_contact = torch.any(
@@ -112,7 +112,7 @@ def illegal_base_height(
     """Terminate if the base height is below the threshold."""
     robot, _ = get_robot_cfg(env, asset_cfg)
     sensor: RayCaster = env.scene[sensor_cfg.name]
-    base_height = robot.data.root_pos_w[:, 2] - torch.mean(sensor.data.ray_hits_w[..., 2], dim=1)
+    base_height = robot.data.root_pos_w.torch[:, 2] - torch.mean(sensor.data.ray_hits_w[..., 2], dim=1)
     return base_height < height_threshold
 
 
@@ -160,7 +160,7 @@ class fall_from_max_height(ManagerTermBase):
         """
         robot, _ = get_robot_cfg(env, asset_cfg)
         sensor: RayCaster = env.scene[sensor_cfg.name]
-        base_height = robot.data.root_pos_w[:, 2] - torch.mean(sensor.data.ray_hits_w[..., 2], dim=1)
+        base_height = robot.data.root_pos_w.torch[:, 2] - torch.mean(sensor.data.ray_hits_w[..., 2], dim=1)
 
         # Only track heights above the minimum threshold
         trackable_height = torch.where(
@@ -227,7 +227,7 @@ class no_height_progress(ManagerTermBase):
         """
         robot, _ = get_robot_cfg(env, asset_cfg)
         sensor: RayCaster = env.scene[sensor_cfg.name]
-        current_height = robot.data.root_pos_w[:, 2] - torch.mean(sensor.data.ray_hits_w[..., 2], dim=1)
+        current_height = robot.data.root_pos_w.torch[:, 2] - torch.mean(sensor.data.ray_hits_w[..., 2], dim=1)
 
         # Check if robot has made progress (current height > initial + threshold)
         self.made_progress |= current_height > (self.initial_height + height_increase_threshold)
@@ -245,7 +245,7 @@ class no_height_progress(ManagerTermBase):
         # Capture initial height for resetting environments
         robot, _ = get_robot_cfg(self._env, self.cfg.params["asset_cfg"])
         sensor: RayCaster = self._env.scene[self.cfg.params["sensor_cfg"].name]
-        current_height = robot.data.root_pos_w[:, 2] - torch.mean(sensor.data.ray_hits_w[..., 2], dim=1)
+        current_height = robot.data.root_pos_w.torch[:, 2] - torch.mean(sensor.data.ray_hits_w[..., 2], dim=1)
 
         self.initial_height[env_ids] = current_height[env_ids]
         self.made_progress[env_ids] = False
@@ -269,7 +269,7 @@ def link_distance(
         Boolean tensor indicating which environments should terminate
     """
     robot, _ = get_robot_cfg(env, asset_cfg)
-    link_pos = robot.data.body_pos_w[:, asset_cfg.body_ids]
+    link_pos = robot.data.body_pos_w.torch[:, asset_cfg.body_ids]
 
     if len(asset_cfg.body_ids) != 2:
         raise ValueError("Link distance is only supported for 2 links")
@@ -307,14 +307,14 @@ def illegal_link_distance_lateral(
         Boolean tensor indicating which environments should terminate
     """
     robot, _ = get_robot_cfg(env, asset_cfg)
-    link_pos_w = robot.data.body_pos_w[:, asset_cfg.body_ids]
+    link_pos_w = robot.data.body_pos_w.torch[:, asset_cfg.body_ids]
 
     if len(asset_cfg.body_ids) != 2:
         raise ValueError("Link distance is only supported for 2 links")
 
     # Transform link positions into root frame
-    root_pos = robot.data.root_pos_w
-    root_quat = robot.data.root_quat_w
+    root_pos = robot.data.root_pos_w.torch
+    root_quat = robot.data.root_quat_w.torch
     link0_b, _ = subtract_frame_transforms(root_pos, root_quat, link_pos_w[:, 0])
     link1_b, _ = subtract_frame_transforms(root_pos, root_quat, link_pos_w[:, 1])
 
@@ -349,10 +349,10 @@ class standing(ManagerTermBase):
         if sensor_cfg is not None:
             sensor: RayCaster = env.scene[sensor_cfg.name]
             # Adjust the target height using the sensor data
-            current_height = asset.data.root_pos_w[:, 2] - torch.mean(sensor.data.ray_hits_w[..., 2], dim=1)
+            current_height = asset.data.root_pos_w.torch[:, 2] - torch.mean(sensor.data.ray_hits_w[..., 2], dim=1)
         else:
             # Use the provided target height directly for flat terrain
-            current_height = asset.data.root_pos_w[:, 2]
+            current_height = asset.data.root_pos_w.torch[:, 2]
 
         is_standing = current_height > min_height
 
@@ -437,9 +437,13 @@ def bad_anchor_ori(
     asset: RigidObject | Articulation = env.scene[asset_cfg.name]
 
     command = env.command_manager.get_term(command_name)
-    motion_projected_gravity_b = math_utils.quat_apply_inverse(command.command_anchor_quat_w, asset.data.GRAVITY_VEC_W)
+    motion_projected_gravity_b = math_utils.quat_apply_inverse(
+        command.command_anchor_quat_w, asset.data.GRAVITY_VEC_W.torch
+    )
 
-    robot_projected_gravity_b = math_utils.quat_apply_inverse(command.robot_anchor_quat_w, asset.data.GRAVITY_VEC_W)
+    robot_projected_gravity_b = math_utils.quat_apply_inverse(
+        command.robot_anchor_quat_w, asset.data.GRAVITY_VEC_W.torch
+    )
 
     return (motion_projected_gravity_b[:, 2] - robot_projected_gravity_b[:, 2]).abs() > threshold
 
@@ -502,26 +506,26 @@ def invalid_state(
 
     # Check for NaN in any state
     has_nan = (
-        torch.isnan(robot.data.joint_pos).any(dim=-1)
-        | torch.isnan(robot.data.joint_vel).any(dim=-1)
-        | torch.isnan(robot.data.root_pos_w).any(dim=-1)
-        | torch.isnan(robot.data.root_lin_vel_w).any(dim=-1)
-        | torch.isnan(robot.data.root_ang_vel_w).any(dim=-1)
+        torch.isnan(robot.data.joint_pos.torch).any(dim=-1)
+        | torch.isnan(robot.data.joint_vel.torch).any(dim=-1)
+        | torch.isnan(robot.data.root_pos_w.torch).any(dim=-1)
+        | torch.isnan(robot.data.root_lin_vel_w.torch).any(dim=-1)
+        | torch.isnan(robot.data.root_ang_vel_w.torch).any(dim=-1)
     )
 
     # Check joint velocities
-    joint_vel_exceeded = torch.abs(robot.data.joint_vel).max(dim=-1).values > max_joint_vel
+    joint_vel_exceeded = torch.abs(robot.data.joint_vel.torch).max(dim=-1).values > max_joint_vel
 
     # Check root position (relative to env origin)
-    root_pos_rel = robot.data.root_pos_w - env.scene.env_origins
+    root_pos_rel = robot.data.root_pos_w.torch - env.scene.env_origins
     root_height_exceeded = root_pos_rel[:, 2] > max_root_height
     root_xy_exceeded = torch.norm(root_pos_rel[:, :2], dim=-1) > max_root_xy_distance
 
     # Check linear velocity
-    lin_vel_exceeded = torch.norm(robot.data.root_lin_vel_w, dim=-1) > max_lin_vel
+    lin_vel_exceeded = torch.norm(robot.data.root_lin_vel_w.torch, dim=-1) > max_lin_vel
 
     # Check angular velocity
-    ang_vel_exceeded = torch.norm(robot.data.root_ang_vel_w, dim=-1) > max_ang_vel
+    ang_vel_exceeded = torch.norm(robot.data.root_ang_vel_w.torch, dim=-1) > max_ang_vel
 
     # Combine all checks
     return has_nan | joint_vel_exceeded | root_height_exceeded | root_xy_exceeded | lin_vel_exceeded | ang_vel_exceeded
@@ -553,7 +557,7 @@ def out_of_bound(
     ranges = torch.tensor(range_list, device=env.device)
 
     # Get object position in world frame
-    object_pos_w = object.data.root_pos_w
+    object_pos_w = object.data.root_pos_w.torch
 
     # Transform object position to reference frame
     if reference_asset_cfg is not None:
@@ -573,8 +577,8 @@ def out_of_bound(
             )
         body_id = body_ids[0]
         # Get the reference link pose in world frame
-        reference_pos_w = reference_asset.data.body_pos_w[:, body_id, :]
-        reference_quat_w = reference_asset.data.body_quat_w[:, body_id, :]
+        reference_pos_w = reference_asset.data.body_pos_w.torch[:, body_id, :]
+        reference_quat_w = reference_asset.data.body_quat_w.torch[:, body_id, :]
         # Transform object position from world frame to reference link frame
         object_pos_local, _ = subtract_frame_transforms(reference_pos_w, reference_quat_w, object_pos_w)
     else:

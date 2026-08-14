@@ -2,7 +2,7 @@
 # Tests robot's ability to track different forward/backward velocities
 # Command changes every 5 seconds
 evaluation:
-  task_name: "Velocity-Height-G1-Dev-v0"
+  task_name: "Velocity-Height-G1-History-v0"
   num_envs: 1
   episode_length_s: 30.0 # Longer than training (30s) to test multiple command changes
   num_episodes: 1

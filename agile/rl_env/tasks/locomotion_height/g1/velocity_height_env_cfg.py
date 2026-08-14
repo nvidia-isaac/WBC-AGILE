@@ -16,6 +16,8 @@
 
 import math
 
+from isaaclab_physx.physics import PhysxCfg
+
 import isaaclab.sim as sim_utils
 from isaaclab.assets import AssetBaseCfg
 from isaaclab.envs import ManagerBasedRLEnvCfg
@@ -29,9 +31,9 @@ from isaaclab.managers import TerminationTermCfg as DoneTerm
 from isaaclab.scene import InteractiveSceneCfg
 from isaaclab.sensors import ContactSensorCfg, RayCasterCfg, patterns
 from isaaclab.terrains import TerrainImporterCfg
-from isaaclab.utils import configclass
 from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR, ISAACLAB_NUCLEUS_DIR
-from isaaclab.utils.noise import AdditiveUniformNoiseCfg as Unoise  # noqa: F401
+from isaaclab.utils.configclass import configclass
+from isaaclab.utils.noise import UniformNoiseCfg as Unoise  # noqa: F401
 
 from agile.rl_env import mdp
 from agile.rl_env.assets.robots import unitree_g1
@@ -134,6 +136,40 @@ class StudentVelocityPolicyCfg(ObsGroup):
     def __post_init__(self):
         self.enable_corruption = True
         self.concatenate_terms = False
+
+
+@configclass
+class HistoryPolicyObservationsCfg:
+    """Observation specs for direct history-based PPO training (no teacher needed)."""
+
+    @configclass
+    class HistoryPolicyCfg(ObsGroup):
+        """Non-privileged observations with history for direct PPO training."""
+
+        velocity_height_commands = ObsTerm(func=mdp.generated_commands, params={"command_name": "base_velocity"})
+        base_ang_vel = ObsTerm(func=mdp.base_ang_vel, noise=Unoise(n_min=-0.2, n_max=0.2))
+        projected_gravity = ObsTerm(func=mdp.projected_gravity, noise=Unoise(n_min=-0.01, n_max=0.01))
+        joint_pos = ObsTerm(
+            func=mdp.joint_pos_rel,
+            noise=Unoise(n_min=-0.01, n_max=0.01),
+            params={"asset_cfg": SceneEntityCfg("robot")},
+        )
+        joint_vel = ObsTerm(
+            func=mdp.joint_vel_rel,
+            noise=Unoise(n_min=-1.5, n_max=1.5),
+            scale=0.1,
+            params={"asset_cfg": SceneEntityCfg("robot")},
+        )
+        actions = ObsTerm(func=mdp.last_action, clip=(-10.0, 10.0))
+
+        def __post_init__(self):
+            self.history_length = 5
+            self.enable_corruption = True
+            self.concatenate_terms = False
+            self.flatten_history_dim = False
+
+    policy: HistoryPolicyCfg = HistoryPolicyCfg()
+    critic: PrivilegedVelocityCriticCfg = PrivilegedVelocityCriticCfg()
 
 
 @configclass
@@ -256,7 +292,7 @@ class CommandsCfg:
         default_height=unitree_g1.DEFAULT_PELVIS_HEIGHT,
         ema_smoothing_param=0.5,
         ranges=mdp.UniformVelocityBaseHeightCommandCfg.Ranges(
-            lin_vel_x=(-0.5, 0.5),
+            lin_vel_x=(-0.5, 1.5),
             lin_vel_y=(-0.5, 0.5),
             ang_vel_z=(-1.0, 1.0),
             heading=(-math.pi, math.pi),
@@ -337,15 +373,15 @@ class RewardsCfg:
     """Reward terms for the MDP."""
 
     # -- task
-    termination_penalty = RewTerm(func=mdp.is_terminated, weight=-200.0)
+    termination_penalty = RewTerm(func=mdp.is_terminated, weight=-1000.0)
     track_lin_vel_xy_exp = RewTerm(
         func=mdp.track_lin_vel_xy_yaw_frame_exp_weighted,
-        weight=1.0,
+        weight=2.0,
         params={"command_name": "base_velocity", "std": 0.2},
     )
     track_ang_vel_z_exp = RewTerm(
         func=mdp.track_ang_vel_z_world_exp,
-        weight=1.0,
+        weight=2.0,
         params={"command_name": "base_velocity", "std": 0.2},
     )
     track_base_height_exp_smooth = RewTerm(
@@ -480,7 +516,6 @@ class RewardsCfg:
         params={
             "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*ankle_roll_link"),
             "force_threshold": 10.0,
-            "kernel": "l1",
         },
     )
 
@@ -488,6 +523,15 @@ class RewardsCfg:
         func=mdp.flat_orientation_l2,
         weight=-10.0,
         params={"asset_cfg": SceneEntityCfg("robot", body_names=["torso_link"])},
+    )
+
+    squat_knee = RewTerm(
+        func=mdp.squat_knee,
+        weight=-0.75,
+        params={
+            "robot_cfg": SceneEntityCfg("robot", joint_names=[".*_knee_joint"]),
+            "command_name": "base_velocity",
+        },
     )
 
     # Penalize hip joint deviation.
@@ -551,7 +595,7 @@ class TerminationsCfg:
         func=mdp.link_distance,
         params={
             "asset_cfg": SceneEntityCfg("robot", body_names=".*knee_link"),
-            "min_distance_threshold": 0.2,
+            "min_distance_threshold": 0.15,
         },
     )
 
@@ -791,6 +835,25 @@ class CurriculumCfg:
         },
     )
 
+    velocity_ramp = CurrTerm(
+        func=mdp.velocity_command_range_step,
+        params={
+            "command_name": "base_velocity",
+            "start_ranges": {
+                "lin_vel_x": (-0.2, 0.5),
+                "lin_vel_y": (-0.2, 0.2),
+                "ang_vel_z": (-0.4, 0.4),
+            },
+            "terminal_ranges": {
+                "lin_vel_x": (-0.5, 1.5),
+                "lin_vel_y": (-0.5, 0.5),
+                "ang_vel_z": (-1.0, 1.0),
+            },
+            "start_step": 0,
+            "num_steps": 192_000,  # 8k iterations * 24 steps/iter
+        },
+    )
+
 
 @configclass
 class G1LowerVelocityHeightEnvCfg(ManagerBasedRLEnvCfg):
@@ -824,7 +887,9 @@ class G1LowerVelocityHeightEnvCfg(ManagerBasedRLEnvCfg):
         self.sim.dt = 1.0 / self.physics_freq  # Should be 0.002
         self.sim.render_interval = self.decimation
         self.sim.physics_material = self.scene.terrain.physics_material
-        self.sim.physx.gpu_max_rigid_patch_count = 10 * 2**15
+        if self.sim.physics is None:
+            self.sim.physics = PhysxCfg()
+        self.sim.physics.gpu_max_rigid_patch_count = 10 * 2**15
 
         # update sensor periods
         if self.scene.contact_forces is not None:
@@ -897,7 +962,7 @@ class G1VelocityHeightRecurrentStudentEnvCfg(G1LowerVelocityHeightEnvCfg):
         self.viewer.eye = (-2.5, -5.0, 2.0)
         self.viewer.lookat = (0.0, 0.0, 0.75)
         self.viewer.origin_type = "world"
-        self.events = None
+        # EventManager must remain configured so its reset callback stays valid.
         self.rewards = None
         self.curriculum = None
         self.observations.policy.enable_corruption = False
@@ -920,3 +985,33 @@ class G1VelocityHeightHistoryStudentEnvCfg(G1VelocityHeightRecurrentStudentEnvCf
         # Mirror loss requires structured (dictionary) observations
         self.observations.policy.concatenate_terms = False
         self.observations.policy.flatten_history_dim = False
+
+
+@configclass
+class G1VelocityHeightHistoryEnvCfg(G1LowerVelocityHeightEnvCfg):
+    """Direct history-based PPO training for velocity-height tracking (no teacher/distillation)."""
+
+    observations: HistoryPolicyObservationsCfg = HistoryPolicyObservationsCfg()
+
+    def __post_init__(self):
+        super().__post_init__()
+
+        # No harness for direct training without curriculum warmup
+        if hasattr(self.curriculum, "remove_harness"):
+            del self.curriculum.remove_harness
+        if hasattr(self.actions, "harness"):
+            del self.actions.harness
+
+    def eval(self):
+        self.scene.terrain.terrain_type = "plane"
+        self.scene.terrain.terrain_generator = None
+        self.viewer.eye = (-2.5, -5.0, 2.0)
+        self.viewer.lookat = (0.0, 0.0, 0.75)
+        self.viewer.origin_type = "world"
+        self.rewards = None
+        self.curriculum = None
+        self.observations.policy.enable_corruption = False
+        self.observations.policy.flatten_history_dim = True
+        self.observations.policy.concatenate_terms = True
+        self.observations.critic.concatenate_terms = True
+        self.observations.eval = mdp.EvaluationObservationsCfg()

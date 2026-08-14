@@ -5,7 +5,7 @@ DUAL LICENSE NOTICE
 This repository contains code under two different licenses:
 
 1. BSD 3-Clause License:
-   - Applies to: agile/algorithms/rsl_rl/ (all files and subdirectories)
+   - Applies to: third_party/rsl_rl/patches/ (RSL-RL compatibility patch)
    - Copyright holders: ETH Zurich, NVIDIA CORPORATION & AFFILIATES
    - See Section A below for full license text
 
@@ -16,12 +16,12 @@ This repository contains code under two different licenses:
 
 When using or distributing this software, you must comply with the license
 terms applicable to each portion of the code. If you modify or redistribute
-the rsl_rl portions (agile/algorithms/rsl_rl/), you must comply with the
-BSD 3-Clause License terms. For all other portions, you must comply with
+the RSL-RL compatibility patch (third_party/rsl_rl/patches/), you must comply
+with the BSD 3-Clause License terms. For all other portions, you must comply with
 the Apache 2.0 License terms.
 
 ================================================================================
-SECTION A: BSD 3-Clause License (for agile/algorithms/rsl_rl/)
+SECTION A: BSD 3-Clause License (for third_party/rsl_rl/patches/)
 ================================================================================
 
 Copyright (c) 2025, ETH Zurich
@@ -52,8 +52,6 @@ LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
 ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-
-See licenses/dependencies for license information of dependencies of this package.
 
 ================================================================================
 SECTION B: Apache License 2.0 (for all other portions of this repository)

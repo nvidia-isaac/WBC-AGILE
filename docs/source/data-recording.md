@@ -30,18 +30,18 @@ Closed-loop inference in simulation.
 ## Prerequisites
 
 - Trained RL policy checkpoint (from `scripts/train.py`)
-- Isaac Lab environment with `G1-PickPlace-Tracking-v0-Record` task
+- Isaac Lab environment with `PickPlace-G1-Record-v0` task
 - [Isaac-GR00T-N1.5](https://github.com/NVIDIA/Isaac-GR00T/tree/n1.5-release) repository for fine-tuning
 
 ---
 
 ## Step 1: Record Demonstration Data
 
-Setup RL environment with appropriate observation group for required data collection. As an example, `G1-PickPlace-Tracking-v0-Record` environment captures RGB images, proprioceptive states, and actions from an RL policy. Observations are defined in `RecordObservationsCfg`.
+Setup RL environment with appropriate observation group for required data collection. As an example, `PickPlace-G1-Record-v0` environment captures RGB images, proprioceptive states, and actions from an RL policy. Observations are defined in `RecordObservationsCfg`.
 
 ```bash
 python scripts/record.py \
-    --task G1-PickPlace-Tracking-v0-Record \
+    --task PickPlace-G1-Record-v0 \
     --checkpoint <path/to/rl/checkpoint.pt> \
     --record \
     --record_output data/recording \
@@ -52,7 +52,7 @@ python scripts/record.py \
 
 | Argument | Description |
 |----------|-------------|
-| `--task` | Environment with camera sensor (`G1-PickPlace-Tracking-v0-Record`) |
+| `--task` | Environment with camera sensor (`PickPlace-G1-Record-v0`) |
 | `--checkpoint` | Path to trained RL policy |
 | `--record` | Enable HDF5 recording |
 | `--record_output` | Output directory (creates `data.h5` inside) |
@@ -221,7 +221,7 @@ In **this repository**, connect to the server and run closed-loop evaluation:
 
 ```bash
 python scripts/record.py \
-    --task G1-PickPlace-Tracking-v0-GR00T-Inference \
+    --task PickPlace-G1-GR00T-Inference-v0 \
     --gr00t \
     --gr00t_host localhost \
     --gr00t_port 6666 \

@@ -249,6 +249,8 @@ class MotionTracker:
         anchor_body_name = config["anchor_body_name"]
         motion_body_names = config["motion_body_names"]
         motion_joint_names = config.get("motion_joint_names")
+        self.target_joint_names = target_joint_names
+        self.root_body_index = motion_body_names.index(config.get("root_body_name", motion_body_names[0]))
 
         print(f"\nLoading motion data from {motion_file}...")
 
@@ -292,6 +294,18 @@ class MotionTracker:
     def get_anchor_quat_w(self) -> torch.Tensor:
         """Motion anchor quaternion ``[w, x, y, z]``, shape ``(4,)``."""
         return self.data._body_quat_w[self.time_step, self.anchor_body_index]
+
+    def get_initial_state(self, sim_joint_names: list[str]) -> dict[str, torch.Tensor]:
+        """Return the current reference motion state in MuJoCo simulation joint order."""
+        sim_indices = [self.target_joint_names.index(name) for name in sim_joint_names]
+        return {
+            "root_pos": self.data._body_pos_w[self.time_step, self.root_body_index],
+            "root_quat": self.data._body_quat_w[self.time_step, self.root_body_index],
+            "root_lin_vel_w": self.data._body_lin_vel_w[self.time_step, self.root_body_index],
+            "root_ang_vel_w": self.data._body_ang_vel_w[self.time_step, self.root_body_index],
+            "joint_pos": self.data.joint_pos[self.time_step, sim_indices],
+            "joint_vel": self.data.joint_vel[self.time_step, sim_indices],
+        }
 
     def reset(self):
         """Reset to beginning of motion."""
@@ -514,8 +528,8 @@ class ObservationProcessor:
         For motion tracking policies: returns cat([target_joint_pos, target_joint_vel])
         from the motion data (in the policy's joint ordering).
 
-        For velocity/height policies: returns the CommandManager's
-        [vx, vy, wz, height] resized (padded or truncated) to the expected dim.
+        For velocity/height policies: returns [vx, vy, wz, height] padded to
+        the expected dimension.
         """
         if self.motion_tracker is not None:
             return self.motion_tracker.get_command()
@@ -526,14 +540,10 @@ class ObservationProcessor:
         else:
             cmd = torch.tensor([0.0, 0.0, 0.0, 0.72], device=self.device, dtype=torch.float32)
 
-        # Resize to expected dimension: pad with zeros if short, drop trailing
-        # entries if long. Velocity-only policies (obs_dim == 3) expect
-        # [vx, vy, wz] and must not receive the trailing height entry.
+        # Pad to expected dimension if needed.
         if cmd.shape[0] < term.obs_dim:
             padding = torch.zeros(term.obs_dim - cmd.shape[0], device=self.device, dtype=torch.float32)
             cmd = torch.cat([cmd, padding], dim=0)
-        elif cmd.shape[0] > term.obs_dim:
-            cmd = cmd[: term.obs_dim]
 
         return cmd
 

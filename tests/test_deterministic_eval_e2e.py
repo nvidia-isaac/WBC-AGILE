@@ -32,17 +32,22 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 
 import pandas as pd
+import pytest
+
+pytestmark = pytest.mark.e2e
 
 
 class TestDeterministicEvalE2E(unittest.TestCase):
     """End-to-end test for deterministic evaluation system."""
 
     DEFAULT_EVAL_TIMEOUT_S = 1200  # Height-map terrain init can be very slow in shared CI runners.
+    TASK = "Velocity-Height-G1-Teacher-v0"
 
     @classmethod
     def setUpClass(cls):
@@ -59,7 +64,7 @@ class TestDeterministicEvalE2E(unittest.TestCase):
             / "data"
             / "policy"
             / "velocity_height_g1"
-            / "unitree_g1_velocity_height_teacher.pt"
+            / "unitree_g1_velocity_height_teacher_torchscript.pt"
         )
 
         # Verify files exist
@@ -76,11 +81,6 @@ class TestDeterministicEvalE2E(unittest.TestCase):
                 f"  2. Download a pretrained checkpoint\n"
                 f"  3. Update the checkpoint path in the test"
             )
-
-        # Check ISAACLAB_PATH is set
-        cls.isaaclab_path = os.environ.get("ISAACLAB_PATH")
-        if not cls.isaaclab_path:
-            raise unittest.SkipTest("ISAACLAB_PATH environment variable is not set")
 
         # Expected schedule from quick_test.yaml
         # Column names map: commands_0=lin_vel_x, commands_1=lin_vel_y, commands_2=ang_vel_z, commands_3=base_height
@@ -163,49 +163,25 @@ class TestDeterministicEvalE2E(unittest.TestCase):
         # Use tmpdir for metrics to avoid polluting logs/ directory
         metrics_file = tmpdir / "metrics.json"
 
-        # Use Isaac Lab wrapper script if ISAACLAB_PATH is set, otherwise use python directly
-        if self.isaaclab_path:
-            isaaclab_script = Path(self.isaaclab_path) / "isaaclab.sh"
-            cmd = [
-                str(isaaclab_script),
-                "-p",
-                str(self.eval_script),
-                "--task",
-                "Velocity-Height-G1-v0",
-                "--checkpoint",
-                str(self.checkpoint),
-                "--eval_config",
-                str(self.quick_config),
-                "--num_envs",
-                "2",
-                "--num_steps",
-                "200",
-                "--run_evaluation",
-                "--save_trajectories",
-                "--headless",
-                "--metrics_file",
-                str(metrics_file),
-            ]
-        else:
-            cmd = [
-                "python",
-                str(self.eval_script),
-                "--task",
-                "Velocity-Height-G1-v0",
-                "--checkpoint",
-                str(self.checkpoint),
-                "--eval_config",
-                str(self.quick_config),
-                "--num_envs",
-                "2",
-                "--num_steps",
-                "200",
-                "--run_evaluation",
-                "--save_trajectories",
-                "--headless",
-                "--metrics_file",
-                str(metrics_file),
-            ]
+        cmd = [
+            sys.executable,
+            str(self.eval_script),
+            "--task",
+            self.TASK,
+            "--checkpoint",
+            str(self.checkpoint),
+            "--eval_config",
+            str(self.quick_config),
+            "--num_envs",
+            "2",
+            "--num_steps",
+            "200",
+            "--run_evaluation",
+            "--save_trajectories",
+            "--headless",
+            "--metrics_file",
+            str(metrics_file),
+        ]
 
         # Set environment variables for headless mode
         env = os.environ.copy()
@@ -247,7 +223,10 @@ class TestDeterministicEvalE2E(unittest.TestCase):
         log_dir = metrics_file.parent
 
         # Verify metrics file was created
-        self.assertTrue(metrics_file.exists(), f"Metrics file not created: {metrics_file}")
+        if not metrics_file.exists():
+            print(f"[TEST] STDOUT:\n{result.stdout[-8000:]}")
+            print(f"[TEST] STDERR:\n{result.stderr[-8000:]}")
+            self.fail(f"Metrics file not created: {metrics_file}")
 
         print(f"[TEST] Log directory: {log_dir}")
 
@@ -266,13 +245,11 @@ class TestDeterministicEvalE2E(unittest.TestCase):
 
         metrics_file = tmpdir / "metrics.json"
 
-        isaaclab_script = Path(self.isaaclab_path) / "isaaclab.sh"
         cmd = [
-            str(isaaclab_script),
-            "-p",
+            sys.executable,
             str(self.eval_script),
             "--task",
-            "Velocity-Height-G1-v0",
+            self.TASK,
             "--checkpoint",
             str(self.checkpoint),
             # Use the eval config for its env overrides (short episode length,
@@ -337,7 +314,10 @@ class TestDeterministicEvalE2E(unittest.TestCase):
             self.fail(f"Evaluation with random commands + noise failed with return code {result.returncode}")
 
         log_dir = metrics_file.parent
-        self.assertTrue(metrics_file.exists(), f"Metrics file not created: {metrics_file}")
+        if not metrics_file.exists():
+            print(f"[TEST] STDOUT:\n{result.stdout[-8000:]}")
+            print(f"[TEST] STDERR:\n{result.stderr[-8000:]}")
+            self.fail(f"Metrics file not created: {metrics_file}")
 
         print(f"[TEST] Log directory: {log_dir}")
         return log_dir
@@ -656,7 +636,7 @@ class TestDeterministicEvalE2E(unittest.TestCase):
         for key in required_keys:
             self.assertIn(key, provenance, f"provenance missing required key: {key}")
 
-        self.assertIn("Velocity-Height-G1-v0", provenance["task"])
+        self.assertIn(self.TASK, provenance["task"])
         self.assertGreater(len(provenance["checkpoint"]), 0, "checkpoint path should not be empty")
         self.assertGreater(len(provenance["timestamp"]), 0, "timestamp should not be empty")
 

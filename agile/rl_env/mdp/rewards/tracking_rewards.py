@@ -13,6 +13,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+"""Reward functions for tracking humanoid end effector and root poses."""
+
+# ruff: noqa: I001
+
+from __future__ import annotations
 
 import torch
 
@@ -22,7 +27,6 @@ from isaaclab.sensors import FrameTransformer
 from isaaclab.utils.math import quat_error_magnitude
 
 from agile.rl_env.mdp.commands.tracking_commands import TrackingCommand
-
 
 def motion_global_anchor_position_error_exp(env: ManagerBasedEnv, command_name: str, std: float) -> torch.Tensor:
     """Reward for tracking anchor position using exponential kernel.
@@ -177,3 +181,5 @@ def hand_object_distance_tracking_exp(
     gated_reward = proximity_reward * decay_weight
 
     return gated_reward
+
+

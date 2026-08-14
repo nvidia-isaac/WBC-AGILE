@@ -38,7 +38,7 @@ workflow:
           OMNI_PASS: omni_pass
           OMNI_USER: omni_user
         wandb:
-          WANDB_API_KEY: wandb_pass
+          WANDB_API_KEY: wandb_api_key
           WANDB_USERNAME: wandb_user
       files:
         - path: /tmp/entry.sh
@@ -46,18 +46,19 @@ workflow:
             set -e
 
             # Launch sweep.
-            CMD="${ISAACLAB_PATH:?}/isaaclab.sh -p scripts/wandb_sweep/run_sweep.py --project_name {{sweep_name}} --agent_count 2"
+            CMD="uv run --frozen --offline --no-sync scripts/wandb_sweep/run_sweep.py --project_name {{sweep_name}} --agent_count 2"
 
             echo $CMD
             eval $CMD
       outputs:
-        - dataset:
-            name: agile:{{workflow_id}}
+        - url: '{{storage_url_prefix}}/{{workflow_id}}/'
 default-values:
   # image_default is set by run.py when submitting; fallback for manual runs (must match run_config container_registry.image_name)
   image_default: docker.io/yourorg/agile:latest
   image: '{{image_default}}'
   omni_server: omniverse://localhost
   workflow_name: agile
+  # Set to a Swift/S3-compatible URL when remote workflow outputs are required.
+  storage_url_prefix: null
   resume: "False"
   sweep_name: t1_velocity_height

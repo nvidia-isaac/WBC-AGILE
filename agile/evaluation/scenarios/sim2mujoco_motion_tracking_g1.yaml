@@ -1,0 +1,21 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+evaluation:
+  task_name: MotionTracking-G1-v0
+  num_envs: 1
+  episode_length_s: 10.0
+  num_episodes: 1
+  sim2mujoco:
+    initial_state: reference_motion
+    motion_tracking_policy_config: agile/data/policy/tracking_flat_g1/tracking_flat_g1.yaml
+    validation:
+      balance:
+        min_pelvis_height: 0.5
+        start_time_s: 0.5
+  environments:
+    - env_ids: [0]
+      name: track_reference_motion
+      schedule:
+        - time: 0.0
+          events:
+            reference_motion: start

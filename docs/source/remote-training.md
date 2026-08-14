@@ -88,23 +88,23 @@ Use `--rebuild` after code changes and `--use-existing` to reuse a previously bu
 # Evaluate latest checkpoint from a W&B training run
 ./run.py eval --name eval_test \
     --wandb_run your-team/project/run_id \
-    --task_name Velocity-Height-G1-Dev-v0
+    --task_name Velocity-Height-G1-History-v0
 
 # Evaluate specific checkpoints
 ./run.py eval --name multi_ckpt \
     --wandb_run your-team/project/run_id \
-    --task_name Velocity-Height-G1-Dev-v0 \
+    --task_name Velocity-Height-G1-History-v0 \
     --checkpoints 5000,10000,15000
 
 # Evaluate a local checkpoint
 ./run.py eval --name eval_local \
     --checkpoint_path /path/to/model_5000.pt \
-    --task_name Velocity-Height-G1-Dev-v0
+    --task_name Velocity-Height-G1-History-v0
 
 # With custom evaluation scenario
 ./run.py eval --name custom_eval \
     --wandb_run your-team/project/run_id \
-    --task_name Velocity-Height-G1-Dev-v0 \
+    --task_name Velocity-Height-G1-History-v0 \
     --eval_config agile/algorithms/evaluation/configs/examples/multi_env_capability_test.yaml
 ```
 
@@ -147,17 +147,17 @@ done
 
 ## Docker Image
 
-The `workflows/Dockerfile` builds on `nvcr.io/nvidia/isaac-lab:2.3.2`:
+The `workflows/Dockerfile` builds on `nvcr.io/nvidia/isaac-lab:3.0.0-beta2`:
 
-1. Installs Python dependencies into Isaac Lab's environment
-2. Removes conflicting rsl_rl packages
-3. Installs custom rsl_rl with TensorDict support
+1. Installs uv
+2. Syncs AGILE's locked uv environment, including Isaac Lab, LEAPP, and public `rsl-rl-lib==5.4.1`
+3. Applies AGILE's RSL-RL compatibility patch
 4. Verifies correct installation
 
 ```bash
 # Build and test locally
 docker build -f workflows/Dockerfile -t agile:test .
-docker run --rm agile:test ${ISAACLAB_PATH}/isaaclab.sh -p scripts/verify_rsl_rl.py
+docker run --rm agile:test uv run --frozen --offline --no-sync scripts/verify_rsl_rl.py
 ```
 
 ## Manual Workflow Submission
@@ -208,7 +208,7 @@ Entry scripts are generated dynamically using OSMO's Jinja templating:
 files:
   - path: /tmp/entry.sh
     contents: |
-      CMD="${ISAACLAB_PATH}/isaaclab.sh -p scripts/train.py "
+      CMD="uv run --frozen --offline --no-sync scripts/train.py "
       {% if seed is defined %}
       CMD+="--seed {{seed}} "
       {% endif %}
@@ -264,5 +264,5 @@ osmo workflow port-forward <workflow-name> train --port 8080  # Debug
 | Workflow stuck | Check logs: `osmo workflow logs <workflow-name>` |
 | `ModuleNotFoundError: tensordict` | Rebuild Docker image with `--rebuild` |
 | Wrong rsl_rl version | Run `scripts/verify_rsl_rl.py` to check |
-| Docker build fails | Check `agile/algorithms/rsl_rl/` exists |
+| Docker build fails | Rebuild with `--no-cache` and check `scripts/verify_rsl_rl.py` |
 | Isaac Sim init failures | Wrapper auto-retries (2 attempts with 10s delay) |

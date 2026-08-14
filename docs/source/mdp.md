@@ -108,7 +108,7 @@ it achieves the objective.
 | `feet_stumble` | Penalize high horizontal contact forces on feet. |
 | `feet_slip` | Penalize horizontal foot velocity when in ground contact. |
 | `foot_orientation_l1` | L1 penalty on foot roll, pitch, yaw with configurable weights. |
-| `impact_velocity_l1` | Penalize large impact velocities at foot contact. |
+| `impact_velocity` | Penalize large impact velocities at foot contact. |
 | `jumping` | Penalize both feet leaving the ground simultaneously. |
 | `equal_foot_force` | Reward even force distribution across both feet (1.0 = perfectly balanced). |
 
@@ -465,11 +465,15 @@ Extends Isaac Lab's `DCMotor` with communication delay simulation:
 - **Torque-speed curve**: Models the DC motor characteristic where available torque
   decreases with joint velocity.
 
+Shipped AGILE robot configurations use this actuator model. Explicit PD torques,
+torque-speed saturation, and randomized latency provide a closer approximation of the
+controller behavior used during deployment.
+
 ### Delayed Implicit Actuator (`DelayedImplicitActuator` / `DelayedImplicitActuatorCfg`)
 
-Extends Isaac Lab's `ImplicitActuator` with the same delay mechanism. Used for
-locomotion-height tasks where the actuator model is simpler but delay is still important
-for sim-to-real transfer.
+Extends Isaac Lab's `ImplicitActuator` with the same delay mechanism. This actuator remains
+available for downstream compatibility, but shipped AGILE robot configurations use delayed
+DC motors.
 
 ```{tip}
 Actuator delay is critical for sim-to-real transfer. Real robots have non-negligible

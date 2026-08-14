@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 # SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 #
@@ -20,6 +22,12 @@
 # flake8: noqa
 
 import argparse
+import sys
+from pathlib import Path
+
+# Prefer this checkout over an editable AGILE installation from another workspace.
+REPO_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO_ROOT))
 
 from isaaclab.app import AppLauncher
 
@@ -34,6 +42,12 @@ parser.add_argument(
     type=int,
     default=200,
     help="Length of the recorded video (in steps).",
+)
+parser.add_argument(
+    "--video_length_s",
+    type=float,
+    default=None,
+    help="Recorded video length in seconds; overrides --video_length using the env control rate.",
 )
 parser.add_argument(
     "--disable_fabric",
@@ -52,6 +66,18 @@ parser.add_argument(
     "--run_evaluation",
     action="store_true",
     help="Run evaluation.",
+)
+parser.add_argument(
+    "--fail_on_non_timeout_dones",
+    action="store_true",
+    default=False,
+    help="Fail if the rollout produces any non-timeout termination. Use this for videos that must be continuous.",
+)
+parser.add_argument(
+    "--non_timeout_done_warmup_steps",
+    type=int,
+    default=0,
+    help="Ignore non-timeout terminations before this rollout step when --fail_on_non_timeout_dones is set.",
 )
 parser.add_argument(
     "--real-time",
@@ -100,12 +126,6 @@ parser.add_argument(
     action="store_true",
     default=False,
     help="Automatically generate HTML report after evaluation (requires --save_trajectories).",
-)
-parser.add_argument(
-    "--export_io",
-    action="store_true",
-    default=False,
-    help="Export IO descriptor YAML file to the exported policy directory.",
 )
 # Random command scheduling
 parser.add_argument(
@@ -174,10 +194,17 @@ from isaaclab_tasks.utils import get_checkpoint_path, parse_env_cfg
 
 import agile.rl_env.tasks  # noqa: F401
 import agile.isaaclab_extras.monkey_patches
-from rsl_rl.runners import OnPolicyRunner
+from agile.isaaclab_extras.record_video import EfficientRecordVideo
+from agile.isaaclab_extras.video_camera import configure_robot_tracking_camera
 from agile.algorithms.evaluation.evaluator import PolicyEvaluator
-from agile.rl_env.rsl_rl import RslRlOnPolicyRunnerCfg, RslRlVecEnvWrapper
-from agile.rl_env.rsl_rl import export_policy_as_jit, export_policy_as_onnx
+from agile.rl_env.rsl_rl import (
+    RslRlOnPolicyRunnerCfg,
+    RslRlVecEnvWrapper,
+    make_rsl_rl_inference_load_cfg,
+    make_rsl_rl_runner,
+)
+from agile.rl_env.rsl_rl.export_pruning import prepare_training_only_actions_for_evaluation
+from agile.rl_env.rsl_rl_observations import policy_observation
 
 
 def _apply_env_overrides(env_cfg, eval_config):
@@ -297,13 +324,8 @@ def load_policy(resume_path, env, agent_cfg):
     # Load as regular checkpoint through OnPolicyRunner
     try:
         print(f"[INFO] Loading model checkpoint from: {resume_path}")
-        ppo_runner = OnPolicyRunner(
-            env,
-            agent_cfg.to_dict(),
-            log_dir=None,
-            device=agent_cfg.device,
-        )
-        ppo_runner.load(resume_path)
+        ppo_runner = make_rsl_rl_runner(env, agent_cfg, log_dir=None, device=agent_cfg.device)
+        ppo_runner.load(resume_path, load_cfg=make_rsl_rl_inference_load_cfg(agent_cfg))
 
         # Obtain the trained policy for inference
         policy = ppo_runner.get_inference_policy(device=device)
@@ -331,6 +353,19 @@ def main():
     if hasattr(env_cfg, "eval"):
         env_cfg.eval()
 
+    removed_actions, default_position_actions = prepare_training_only_actions_for_evaluation(env_cfg)
+    for removed_action in removed_actions:
+        print(f"[INFO] Removed training-only action for evaluation: {removed_action}")
+    for action_name in default_position_actions:
+        print(f"[INFO] Holding evaluation action at the default joint positions: {action_name}")
+
+    # Isaac Lab 3.0.0b2's plane USD has neither the legacy collision nor shader prims its
+    # terrain importer expects. The compatibility patch retains the plane's built-in setup.
+    terrain_cfg = getattr(getattr(env_cfg, "scene", None), "terrain", None)
+    if terrain_cfg is not None and terrain_cfg.terrain_type == "plane":
+        terrain_cfg.physics_material = None
+        terrain_cfg.visual_material = None
+
     # Load evaluation scenario config early to override episode length before env creation
     eval_config = None
     if args_cli.eval_config:
@@ -342,6 +377,10 @@ def main():
         # Apply environment overrides from eval config BEFORE environment is created
         # This includes episode length, num_envs, event disabling, etc.
         _apply_env_overrides(env_cfg, eval_config)
+
+    if args_cli.video:
+        configure_robot_tracking_camera(env_cfg.viewer)
+        print("[INFO] Recording video with the camera tracking robot in environment 0.")
 
     agent_cfg: RslRlOnPolicyRunnerCfg = cli_args.parse_rsl_rl_cfg(args_cli.task, args_cli)
 
@@ -379,6 +418,15 @@ def main():
 
     # wrap for video recording
     if args_cli.video:
+        # A seconds-based length is robust across tasks with different control rates. Convert it to
+        # steps using the env control dt (sim.dt * decimation), which is also the recorded frame rate.
+        if args_cli.video_length_s is not None:
+            control_dt = env_cfg.sim.dt * env_cfg.decimation
+            args_cli.video_length = max(1, round(args_cli.video_length_s / control_dt))
+            print(
+                f"[INFO] video_length_s={args_cli.video_length_s}s -> {args_cli.video_length} steps "
+                f"(control_dt={control_dt:.4f}s)"
+            )
         video_kwargs = {
             "video_folder": os.path.join(log_dir, "videos", "play"),
             "step_trigger": lambda step: step == 0,
@@ -387,7 +435,7 @@ def main():
         }
         print("[INFO] Recording videos during training.")
         print_dict(video_kwargs, nesting=4)
-        env = gym.wrappers.RecordVideo(env, **video_kwargs)
+        env = EfficientRecordVideo(env, app_launcher=app_launcher, **video_kwargs)
 
     # wrap around environment for rsl-rl
     env = RslRlVecEnvWrapper(env)
@@ -397,67 +445,17 @@ def main():
 
     # Export policy to onnx/jit if we loaded from a regular checkpoint
     # (Skip if already TorchScript or if export fails)
-    export_model_dir = None
     if ppo_runner is not None:
         try:
             export_model_dir = os.path.join(os.path.dirname(resume_path), "exported")
-            export_policy_as_jit(
-                ppo_runner.alg.policy,
-                ppo_runner.obs_normalizer,
-                path=export_model_dir,
-                filename="policy.pt",
-            )
-            export_policy_as_onnx(
-                ppo_runner.alg.policy,
-                normalizer=ppo_runner.obs_normalizer,
-                path=export_model_dir,
-                filename="policy.onnx",
-            )
+            ppo_runner.export_policy_to_jit(path=export_model_dir, filename="policy.pt")
+            ppo_runner.export_policy_to_onnx(path=export_model_dir, filename="policy.onnx")
             print("[INFO] Successfully exported policy to JIT and ONNX")
         except Exception as e:
             print(f"[WARNING] Failed to export policy (continuing evaluation anyway): {e}")
             # This is not critical for evaluation, so we continue
     else:
         print("[INFO] Skipping export (policy already in TorchScript format)")
-        # If loaded from TorchScript, the exported directory should already exist
-        export_model_dir = os.path.join(os.path.dirname(resume_path), "exported")
-
-    # Export IO descriptor if requested
-    if args_cli.export_io:
-        if export_model_dir:
-            print(f"[INFO] Exporting IO descriptor to {export_model_dir}...")
-            try:
-                import subprocess
-                import sys
-
-                # Get the path to the export_IODescriptors.py script
-                script_dir = os.path.dirname(os.path.abspath(__file__))
-                export_script = os.path.join(script_dir, "export_IODescriptors.py")
-
-                # Build the command to run the export script
-                cmd = [
-                    sys.executable,
-                    export_script,
-                    "--task",
-                    args_cli.task,
-                    "--output_dir",
-                    export_model_dir,
-                    "--headless",
-                ]
-
-                # Run the export script
-                result = subprocess.run(cmd, check=True, capture_output=True, text=True)
-                print("[INFO] Successfully exported IO descriptor")
-                if result.stdout:
-                    print(result.stdout)
-            except subprocess.CalledProcessError as e:
-                print(f"[WARNING] Failed to export IO descriptor: {e}")
-                if e.stderr:
-                    print(f"[ERROR] {e.stderr}")
-            except Exception as e:
-                print(f"[WARNING] Failed to export IO descriptor: {e}")
-        else:
-            print("[WARNING] Cannot export IO descriptor: export directory not available")
 
     # Get the control timestep (not physics timestep - accounts for decimation)
     dt = env.unwrapped.step_dt
@@ -497,6 +495,14 @@ def main():
         metrics_path = os.path.dirname(args_cli.metrics_file)
         os.makedirs(metrics_path, exist_ok=True)
 
+    # Motion metrics require an "eval" observation group; other tasks still record video.
+    if args_cli.run_evaluation and "eval" not in env.unwrapped.observation_manager.active_terms:
+        print(
+            "[WARNING] --run_evaluation requested but this task has no 'eval' observation group; "
+            "skipping motion-metrics evaluation and recording a rollout video only."
+        )
+        args_cli.run_evaluation = False
+
     if args_cli.run_evaluation:
         print("[INFO] Running default motion metrics evaluator.")
         if args_cli.save_trajectories and args_cli.trajectory_fields:
@@ -517,7 +523,7 @@ def main():
         if eval_config is not None:
             total_episodes = eval_config.num_envs * eval_config.num_episodes
             print(
-                f"[INFO] Will collect {total_episodes} episodes ({eval_config.num_envs} envs × {eval_config.num_episodes} episodes each)"
+                f"[INFO] Will collect {total_episodes} episodes ({eval_config.num_envs} envs x {eval_config.num_episodes} episodes each)"
             )
         else:
             total_episodes = args_cli.num_envs
@@ -559,9 +565,11 @@ def main():
         scheduler.reset()
 
     print("[INFO] Running evaluation...")
-    obs, _ = env.get_observations()
+    obs = env.get_observations()
     timestep = 0
     num_steps = 0
+    non_timeout_done_count = 0
+    non_timeout_done_steps: list[int] = []
 
     # Check if we need to convert TensorDict to tensor for exported policies. This is necessary when we are loading
     # a TorchScript policy instead of a regular checkpoint.
@@ -590,8 +598,7 @@ def main():
                 scheduler.update(dt)
             # Convert TensorDict to tensor if needed (for exported TorchScript policies)
             if is_tensordict_obs and ppo_runner is None:
-                # Flatten TensorDict to tensor for exported policy
-                obs_tensor = torch.cat([v.flatten(start_dim=1) for v in obs.values()], dim=-1)
+                obs_tensor = policy_observation(obs)
             else:
                 obs_tensor = obs
 
@@ -614,6 +621,20 @@ def main():
             # env stepping
             obs, _, dones, extras = env.step(actions)
 
+            if args_cli.fail_on_non_timeout_dones:
+                done_mask = dones.to(dtype=torch.bool)
+                time_outs = extras.get("time_outs")
+                if time_outs is None:
+                    timeout_mask = torch.zeros_like(done_mask, dtype=torch.bool)
+                else:
+                    timeout_mask = time_outs.to(device=done_mask.device, dtype=torch.bool)
+                non_timeout_done_mask = done_mask & ~timeout_mask
+                non_timeout_count = int(non_timeout_done_mask.sum().item())
+                if non_timeout_count and num_steps >= args_cli.non_timeout_done_warmup_steps:
+                    non_timeout_done_count += non_timeout_count
+                    if len(non_timeout_done_steps) < 10:
+                        non_timeout_done_steps.append(num_steps)
+
             # Reapply scheduled commands after env.step()
             # This is necessary because command_manager.compute() inside env.step()
             # resamples commands, which would overwrite our scheduled values.
@@ -621,7 +642,7 @@ def main():
             if scheduler:
                 scheduler.reapply_commands()
                 # Get the recomputed observations and extras
-                obs, extras = env.get_observations()
+                obs, extras = env.get_observations_with_extras()
 
                 # CRITICAL FIX: _update_command() inside observation_manager.compute() may have
                 # modified our scheduled commands before they were captured in observations.
@@ -664,8 +685,9 @@ def main():
 
         if args_cli.video:
             timestep += 1
-            # Exit the play loop after recording one video
-            if timestep == args_cli.video_length:
+            # A video limits recording only. Metric evaluation must continue until all scheduled
+            # episodes finish, otherwise a short report video would silently produce partial metrics.
+            if timestep == args_cli.video_length and not args_cli.run_evaluation:
                 break
 
         # time delay for real-time evaluation
@@ -676,7 +698,13 @@ def main():
         num_steps += 1
 
         if args_cli.run_evaluation:
-            # Update the evaluator with corrected extras that contain the right commands
+            # The RSL-RL wrapper's step() does not put raw observations into ``extras``, but the
+            # evaluator needs ``extras["observations"]`` (the "eval" group). The scheduler branch
+            # above refreshes ``extras`` via ``get_observations_with_extras()``; when no scheduler
+            # is active, populate it here so evaluation works regardless of the eval config.
+            if "observations" not in extras:
+                extras["observations"] = env.get_observations_with_extras()[1]["observations"]
+            # Update the evaluator with extras that contain the observations (and corrected commands).
             done = evaluator.collect(dones, extras)
             if done:
                 break
@@ -701,7 +729,7 @@ def main():
 
                 # Use the metrics_path from evaluator (where trajectories are saved)
                 if evaluator._metrics_path:
-                    generator = TrajectoryReportGenerator(evaluator._metrics_path)
+                    generator = TrajectoryReportGenerator(evaluator._metrics_path, task_name=args_cli.task)
                     report_path = generator.generate_full_report(
                         episode_ids="all",
                         include_all_joints=True,
@@ -718,6 +746,12 @@ def main():
 
     # close the simulator
     env.close()
+    if args_cli.fail_on_non_timeout_dones and non_timeout_done_count:
+        raise RuntimeError(
+            "Isaac Lab rollout had "
+            f"{non_timeout_done_count} non-timeout termination(s); "
+            f"first steps: {non_timeout_done_steps}"
+        )
 
 
 def _call_pre_learn_hook(env, task_name: str, agent_cfg=None) -> None:
@@ -750,22 +784,6 @@ def _call_pre_learn_hook(env, task_name: str, agent_cfg=None) -> None:
 
 
 if __name__ == "__main__":
-    # run the main function with propery error handling for CI/CD.
-    exit_code = 0
-    try:
-        main()
-    except Exception as e:
-        import traceback
+    from agile.evaluation.cli_exit import run_main_with_simulation_app
 
-        print(f"\n[ERROR] Evaluation failed with exception: {e}", flush=True)
-        traceback.print_exc()
-        exit_code = 1
-    finally:
-        # close sim app
-        simulation_app.close()
-
-    # Exit with appropriate code
-    if exit_code != 0:
-        import sys
-
-        sys.exit(exit_code)
+    run_main_with_simulation_app(main, simulation_app)

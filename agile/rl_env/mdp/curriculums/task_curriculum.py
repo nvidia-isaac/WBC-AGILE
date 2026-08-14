@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Sequence
-from typing import TYPE_CHECKING, Any, Literal, TypeAlias
+from typing import TYPE_CHECKING, Any, Literal
 
 import torch
 
@@ -30,7 +30,7 @@ from isaaclab.terrains import TerrainImporter
 
 from agile.rl_env.mdp import HarnessAction
 
-Direction: TypeAlias = Literal["above", "below"]
+type Direction = Literal["above", "below"]
 
 if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedRLEnv
@@ -228,11 +228,11 @@ class terrain_levels_standing_at_timeout(ManagerTermBase):
         asset = env.scene[asset_cfg.name]
         if sensor_cfg is not None:
             sensor: RayCaster = env.scene[sensor_cfg.name]
-            current_height = asset.data.root_pos_w[env_ids, 2] - torch.mean(
+            current_height = asset.data.root_pos_w.torch[env_ids, 2] - torch.mean(
                 sensor.data.ray_hits_w[env_ids, ..., 2], dim=1
             )
         else:
-            current_height = asset.data.root_pos_w[env_ids, 2]
+            current_height = asset.data.root_pos_w.torch[env_ids, 2]
 
         is_standing = current_height > min_height
 
@@ -388,8 +388,7 @@ class action_limit_successful_termination(ManagerTermBase):
     ) -> torch.Tensor:
         """Curriculum based on the ratio of successful terminations.
 
-        Note: This curriculum only makes sense if the action is a relative joint action
-        Note: This curriculum changes the action clip range which means that the exported IO descriptor will not be correct.
+        Note: This curriculum only makes sense if the action is a relative joint action.
 
         The action limit is increased if it terminates due to the specified `successful_termination_term` more than
         `move_up_ratio` times and it is decreased if it terminates less then `move_down_ratio` times.
@@ -596,7 +595,7 @@ class adaptive_force_decay(ManagerTermBase):
             if hasattr(self._command_term, "vel_xy_smoothed"):
                 cur_vel_xy = self._command_term.vel_xy_smoothed
             else:
-                cur_vel_xy = env.scene["robot"].data.root_lin_vel_b[:, :2]
+                cur_vel_xy = env.scene["robot"].data.root_lin_vel_b.torch[:, :2]
             metric = float(torch.norm(cmd_vel_xy - cur_vel_xy, dim=1).mean().item())
         elif metric_name == "yaw_error":
             cmd_yaw = self._command_term.command[:, 2]
@@ -605,10 +604,10 @@ class adaptive_force_decay(ManagerTermBase):
             if hasattr(self._action, "_yaw_rate_smoothed"):
                 cur_yaw = self._action._yaw_rate_smoothed
             else:
-                cur_yaw = env.scene["robot"].data.root_ang_vel_w[:, 2]
+                cur_yaw = env.scene["robot"].data.root_ang_vel_w.torch[:, 2]
             metric = float(torch.abs(cmd_yaw - cur_yaw).mean().item())
         elif metric_name == "orientation_error":
-            gravity = env.scene["robot"].data.projected_gravity_b  # (N, 3)
+            gravity = env.scene["robot"].data.projected_gravity_b.torch  # (N, 3)
             # Roll/pitch error from upright: projected gravity should be (0, 0, -1)
             metric = float(torch.norm(gravity[:, :2], dim=1).mean().item())
         elif metric_name == "height_error" and hasattr(self._command_term, "base_height"):
@@ -659,7 +658,7 @@ class goal_pose_force_decay(ManagerTermBase):
     def _get_metric(self, env: ManagerBasedRLEnv) -> torch.Tensor:
         """Get the per-env metric tensor."""
         if self._metric_name == "orientation_error":
-            gravity = env.scene["robot"].data.projected_gravity_b
+            gravity = env.scene["robot"].data.projected_gravity_b.torch
             return torch.norm(gravity[:, :2], dim=1)
         return self._command_term.metrics[self._metric_name]
 
@@ -1218,83 +1217,6 @@ def switch_action_to_target_mode(
     if env.common_step_counter >= switch_step and not action_term.use_target_mode:
         action_term.switch_to_target_mode()
     return float(action_term.use_target_mode)
-
-
-class update_command_bin_distance_step(ManagerTermBase):
-    """Curriculum that increases the max_bin_distance on an EETargetCommand over training."""
-
-    def __call__(
-        self,
-        env: ManagerBasedRLEnv,
-        env_ids: Sequence[int],  # noqa: ARG002
-        command_name: str,
-        start_step: int,
-        num_steps: int,
-        start_distance: int,
-        terminal_distance: int,
-    ) -> float:
-        """Linearly interpolate max_bin_distance from start to terminal over num_steps.
-
-        Args:
-            command_name: Name of the EETargetCommand term.
-            start_step: Step to begin increasing.
-            num_steps: Steps over which to ramp.
-            start_distance: Initial max_bin_distance (e.g. 0 = same bin).
-            terminal_distance: Final max_bin_distance (e.g. -1 to disable = full uniform).
-        """
-        command = env.command_manager.get_term(command_name)
-        if env.common_step_counter <= start_step:
-            command.max_bin_distance = start_distance
-            return float(start_distance)
-        elif env.common_step_counter > start_step + num_steps:
-            command.max_bin_distance = terminal_distance
-            return float(terminal_distance)
-        else:
-            scale = (env.common_step_counter - start_step) / num_steps
-            new_dist = int(start_distance + scale * (terminal_distance - start_distance))
-            command.max_bin_distance = new_dist
-            return float(new_dist)
-
-
-class update_command_scalar_step(ManagerTermBase):
-    """Curriculum that linearly ramps a scalar attribute on an EETargetCommand.
-
-    Works for any float attribute: ``pos_delta``, ``ori_delta``, ``box_scale``, etc.
-    """
-
-    def __call__(
-        self,
-        env: ManagerBasedRLEnv,
-        env_ids: Sequence[int],  # noqa: ARG002
-        command_name: str,
-        attr_name: str,
-        start_step: int,
-        num_steps: int,
-        start_value: float,
-        terminal_value: float,
-    ) -> float:
-        """Linearly interpolate an attribute from start to terminal over num_steps.
-
-        Args:
-            command_name: Name of the command term.
-            attr_name: Name of the float attribute to modify (e.g. "pos_delta").
-            start_step: Step to begin ramping.
-            num_steps: Steps over which to ramp.
-            start_value: Initial value.
-            terminal_value: Final value.
-        """
-        command = env.command_manager.get_term(command_name)
-        if env.common_step_counter <= start_step:
-            setattr(command, attr_name, start_value)
-            return start_value
-        elif env.common_step_counter > start_step + num_steps:
-            setattr(command, attr_name, terminal_value)
-            return terminal_value
-        else:
-            frac = (env.common_step_counter - start_step) / num_steps
-            new_value = start_value + frac * (terminal_value - start_value)
-            setattr(command, attr_name, new_value)
-            return float(new_value)
 
 
 class update_episode_length_step(ManagerTermBase):

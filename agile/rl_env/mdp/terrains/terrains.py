@@ -77,10 +77,10 @@ ROUGH_TERRAIN_CFG = TerrainGeneratorCfg(
 
 
 LESS_ROUGH_TERRAIN_CFG = TerrainGeneratorCfg(
-    size=(8.0, 8.0),
+    size=(16.0, 16.0),
     border_width=100.0,
-    num_rows=20,  # num different difficulties
-    num_cols=16,  # num terrains per same difficulty level
+    num_rows=10,  # num different difficulties
+    num_cols=9,  # num terrains per same difficulty level
     horizontal_scale=0.4,
     vertical_scale=0.005,
     slope_threshold=0.75,
@@ -93,11 +93,12 @@ LESS_ROUGH_TERRAIN_CFG = TerrainGeneratorCfg(
             platform_width=0.1,
         ),
         "random_rough_small": HfRandomUniformTerrainDifficultyCfg(
-            proportion=1.0,
+            proportion=0.2,
             noise_range=(0.01, 0.1),
             noise_step=0.1,
             border_width=0.4,
         ),
+        "wave_small": terrain_gen.HfWaveTerrainCfg(proportion=0.2, amplitude_range=(0.01, 0.25), num_waves=6),
     },
 )
 

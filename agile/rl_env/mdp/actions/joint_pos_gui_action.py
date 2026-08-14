@@ -56,7 +56,7 @@ class JointPositionGUIAction(JointPositionAction):
 
         # Helper to safely slice/select joints on tensors living on either CPU or GPU
         # (defined below __init__).
-        self._desired_pos = self._select_joints(self._asset.data.joint_pos).clone()
+        self._desired_pos = self._select_joints(self._asset.data.joint_pos.torch).clone()
 
         # Desired PD gains for the robot actuators
         # IMPORTANT: We need to build the gains in the correct joint order, not actuator order
@@ -82,27 +82,6 @@ class JointPositionGUIAction(JointPositionAction):
         self._default_damping = self._desired_damping.clone()
         self._mirror_actions = cfg.mirror_actions
         self._robot_type = cfg.robot_type
-
-        # Pre-allocate buffers for apply_actions (avoid per-step allocations)
-        self._full_stiffness_buffer = torch.zeros(self.num_envs, num_all_joints, device=self.device)
-        self._full_damping_buffer = torch.zeros(self.num_envs, num_all_joints, device=self.device)
-
-        # Pre-compute joint_ids as a tensor for efficient indexing
-        if isinstance(self._joint_ids, slice):
-            self._joint_ids_tensor = torch.arange(
-                self._joint_ids.start or 0,
-                self._joint_ids.stop,
-                self._joint_ids.step or 1,
-                device=self.device,
-            )
-        else:
-            self._joint_ids_tensor = torch.tensor(self._joint_ids, device=self.device, dtype=torch.long)
-
-        # Pre-compute actuator joint IDs as tensors
-        self._actuator_joint_ids: dict[str, torch.Tensor] = {}
-        for name, actuator in self._asset.actuators.items():
-            actuator_joint_ids = self._asset.find_joints(actuator.joint_names)[0]
-            self._actuator_joint_ids[name] = torch.tensor(actuator_joint_ids, device=self.device, dtype=torch.long)
 
         if self._robot_type == "g1":
             self._symmetry_augmentation_func = lr_mirror_G1
@@ -148,7 +127,7 @@ class JointPositionGUIAction(JointPositionAction):
                 """Reset all joints to their default positions and gains."""
                 with self._lock:
                     # Default positions for all envs
-                    default_pos = self._select_joints(self._asset.data.default_joint_pos)
+                    default_pos = self._select_joints(self._asset.data.default_joint_pos.torch)
                     self._desired_pos[:] = default_pos.clone()
                     self._desired_stiffness[:] = self._default_stiffness.clone()
                     self._desired_damping[:] = self._default_damping.clone()
@@ -167,7 +146,7 @@ class JointPositionGUIAction(JointPositionAction):
             def _randomize_joints_cb() -> None:
                 """Randomize all joints within their limits."""
                 with self._lock:
-                    limits = self._select_joints(self._asset.data.soft_joint_pos_limits[0].T).T.cpu()
+                    limits = self._select_joints(self._asset.data.soft_joint_pos_limits.torch[0].T).T.cpu()
                     low = limits[:, 0]
                     high = limits[:, 1]
                     # Generate random positions
@@ -193,7 +172,7 @@ class JointPositionGUIAction(JointPositionAction):
                         joint_idx = local_id if isinstance(self._joint_ids, slice) else self._joint_ids[local_id]
 
                         # Fetch soft limits (first environment)
-                        limits = self._asset.data.soft_joint_pos_limits[0, joint_idx].cpu()
+                        limits = self._asset.data.soft_joint_pos_limits.torch[0, joint_idx].cpu()
                         low, high = float(limits[0]), float(limits[1])
                         current_val = float(self._desired_pos[0, local_id].cpu())
                         current_stiffness = float(self._desired_stiffness[0, local_id].cpu())
@@ -301,7 +280,7 @@ class JointPositionGUIAction(JointPositionAction):
             # Read data from asset
             with self._lock:
                 # applied_effort is on the asset's device
-                applied_effort = self._select_joints(self._asset.data.applied_torque).clone()
+                applied_effort = self._select_joints(self._asset.data.applied_torque.torch).clone()
             # Move data to CPU
             applied_effort_cpu = applied_effort.cpu()
             # Update all effort bars
@@ -352,22 +331,39 @@ class JointPositionGUIAction(JointPositionAction):
 
         self._asset.set_joint_position_target(full_pos, joint_ids=self._joint_ids)
 
-        # Apply PD gains using pre-allocated buffers
-        # Populate from actuators in correct joint positions
-        for name, actuator in self._asset.actuators.items():
-            joint_ids = self._actuator_joint_ids[name]
-            self._full_stiffness_buffer[:, joint_ids] = actuator.stiffness
-            self._full_damping_buffer[:, joint_ids] = actuator.damping
+        # Apply PD gains
+        if isinstance(self._joint_ids, slice):
+            # Create a tensor representing the range of the slice
+            joint_ids_tensor = torch.arange(
+                self._joint_ids.start or 0,
+                self._joint_ids.stop,
+                self._joint_ids.step or 1,
+                device=self.device,
+            )
+        else:
+            joint_ids_tensor = torch.tensor(self._joint_ids, device=self.device)
+
+        # Create a full tensor for all stiffness and damping values
+        full_stiffness = torch.cat(
+            [actuator.stiffness.clone() for actuator in self._asset.actuators.values()],
+            dim=1,
+        )
+        full_damping = torch.cat(
+            [actuator.damping.clone() for actuator in self._asset.actuators.values()],
+            dim=1,
+        )
 
         # Update the values for the selected joints
-        self._full_stiffness_buffer[:, self._joint_ids_tensor] = target_stiffness
-        self._full_damping_buffer[:, self._joint_ids_tensor] = target_damping
+        full_stiffness[:, joint_ids_tensor] = target_stiffness
+        full_damping[:, joint_ids_tensor] = target_damping
 
         # Distribute the updated values back to the actuators
-        for name, actuator in self._asset.actuators.items():
-            joint_ids = self._actuator_joint_ids[name]
-            actuator.stiffness[:] = self._full_stiffness_buffer.index_select(1, joint_ids)
-            actuator.damping[:] = self._full_damping_buffer.index_select(1, joint_ids)
+        offset = 0
+        for actuator in self._asset.actuators.values():
+            num_dof = actuator.stiffness.shape[1]
+            actuator.stiffness[:] = full_stiffness.narrow(1, offset, num_dof)
+            actuator.damping[:] = full_damping.narrow(1, offset, num_dof)
+            offset += num_dof
 
     # ---------------------------------------------------------------------
     # Misc helpers
@@ -379,7 +375,7 @@ class JointPositionGUIAction(JointPositionAction):
         # Synchronize GUI sliders with environment after reset (optional)
         if env_ids is None or 0 in env_ids:
             with self._lock:
-                self._desired_pos[...] = self._select_joints(self._asset.data.joint_pos).clone()
+                self._desired_pos[...] = self._select_joints(self._asset.data.joint_pos.torch).clone()
                 self._desired_stiffness[...] = self._default_stiffness.clone()
                 self._desired_damping[...] = self._default_damping.clone()
 

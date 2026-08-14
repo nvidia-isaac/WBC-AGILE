@@ -15,6 +15,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any
 
 import torch
@@ -74,9 +75,9 @@ class RandomPositionAction(JointAction):
         # initialize the action term
         super().__init__(cfg, env)
         # use default joint positions as offset
-        self._offset = self._asset.data.default_joint_pos[:, self._joint_ids].clone()
-        self._joint_limits = self._asset.data.joint_pos_limits[:, self._joint_ids].clone()
-        self._velocity_limits = self._asset.data.joint_vel_limits[:, self._joint_ids].clone()
+        self._offset = self._asset.data.default_joint_pos.torch[:, self._joint_ids].clone()
+        self._joint_limits = self._asset.data.joint_pos_limits.torch[:, self._joint_ids].clone()
+        self._velocity_limits = self._asset.data.joint_vel_limits.torch[:, self._joint_ids].clone()
         self._sample_range = cfg.sample_range
 
         # Override joint limits if specified in config
@@ -112,9 +113,11 @@ class RandomPositionAction(JointAction):
 
         self._processed_actions = self._offset.clone()
         self._target_processed_actions = self._offset.clone()
-
-        # Do not export the IO descriptor for this action term.
-        self._export_IO_descriptor = False
+        self._command_term = self._env.command_manager.get_term(self.cfg.command_name)
+        self._previous_is_walking = torch.zeros(self._env.num_envs, dtype=torch.bool, device=self._asset.device)
+        self._target_write_pending = True
+        if isinstance(self._velocity_profile, EMAVelocityProfile):
+            self._velocity_profile.initialize_state(self._offset)
 
     def _create_velocity_profile(self, profile_cfg: VelocityProfileBaseCfg, **kwargs: Any) -> VelocityProfileBase:
         """Factory method to create appropriate velocity profile.
@@ -145,6 +148,16 @@ class RandomPositionAction(JointAction):
 
     def process_actions(self, actions: torch.Tensor) -> None:  # noqa: ARG002
         """Sample random actions for the joints in the action term."""
+        if not self.cfg.randomize:
+            self._processed_actions.copy_(self._offset)
+            self._target_processed_actions.copy_(self._offset)
+            self._target_write_pending = True
+            return
+
+        if isinstance(self._velocity_profile, EMAVelocityProfile):
+            self._process_ema_actions(self._velocity_profile)
+            return
+
         self._time_since_last_sample += self._env.step_dt
         resample_action_mask = self._time_since_last_sample > self._time_to_resample_sample
         self._time_since_last_sample[resample_action_mask] = 0.0
@@ -192,7 +205,78 @@ class RandomPositionAction(JointAction):
 
         # Update positions using velocity profile
         self._processed_actions = self._velocity_profile.compute_next_position(dt=self._env.step_dt)
+        self._target_write_pending = True
+
+    def reset(self, env_ids: Sequence[int] | None = None) -> None:
+        """Reset raw actions and restore selected EMA environments to their default pose."""
+        super().reset(env_ids)
+        if not isinstance(self._velocity_profile, EMAVelocityProfile):
+            return
+
+        if env_ids is None:
+            reset_env_ids = torch.arange(self._env.num_envs, device=self._asset.device)
+        elif isinstance(env_ids, torch.Tensor):
+            reset_env_ids = env_ids.to(device=self._asset.device)
+        else:
+            reset_env_ids = torch.as_tensor(env_ids, dtype=torch.long, device=self._asset.device)
+
+        reset_offset = self._offset[reset_env_ids]
+        self._processed_actions[reset_env_ids] = reset_offset
+        self._target_processed_actions[reset_env_ids] = reset_offset
+        self._velocity_profile.initialize_state(reset_offset, env_ids=reset_env_ids)
+        self._previous_is_walking[reset_env_ids] = False
+        self._time_since_last_sample[reset_env_ids] = 0.0
+        self._time_to_resample_sample[reset_env_ids] = (
+            torch.rand(self._time_to_resample_sample[reset_env_ids].shape, device=self._asset.device)
+            * (self._sample_range[1] - self._sample_range[0])
+            + self._sample_range[0]
+        )
+        self._target_write_pending = True
+
+    def _process_ema_actions(self, velocity_profile: EMAVelocityProfile) -> None:
+        """Update EMA targets without resampling while environments are walking."""
+        self._time_since_last_sample += self._env.step_dt
+        is_walking = (
+            ~(self._command_term.command[:, :3] == 0).all(dim=1)
+            if self.cfg.no_random_when_walking
+            else torch.zeros_like(self._previous_is_walking)
+        )
+        scheduled = self._time_since_last_sample > self._time_to_resample_sample
+        eligible = scheduled & ~is_walking
+
+        self._time_since_last_sample[eligible] = 0.0
+        if eligible.any():
+            self._time_to_resample_sample[eligible] = (
+                torch.rand(eligible.sum(), device=self._asset.device)  # type: ignore[call-overload]
+                * (self._sample_range[1] - self._sample_range[0])
+                + self._sample_range[0]
+            )
+            new_targets = (
+                torch.rand(
+                    eligible.sum(),
+                    self._num_joints,
+                    device=self._asset.device,
+                )  # type: ignore[call-overload]
+                * (self._joint_limits[eligible, :, 1] - self._joint_limits[eligible, :, 0])
+                + self._joint_limits[eligible, :, 0]
+            )
+            self._target_processed_actions[eligible] = new_targets
+            env_ids = eligible.nonzero().squeeze(-1)
+            velocity_profile.set_target(self._processed_actions[eligible], new_targets, env_ids=env_ids)
+
+        started_walking = is_walking & ~self._previous_is_walking
+        started_walking_joints = started_walking.unsqueeze(-1)
+        self._target_processed_actions.copy_(
+            torch.where(started_walking_joints, self._offset, self._target_processed_actions)
+        )
+        velocity_profile.redirect_target(self._offset, env_mask=started_walking)
+        self._previous_is_walking.copy_(is_walking)
+        self._processed_actions = velocity_profile.compute_next_position(dt=self._env.step_dt)
+        self._target_write_pending = True
 
     def apply_actions(self) -> None:
+        if not self._target_write_pending:
+            return
         # set position targets
         self._asset.set_joint_position_target(self.processed_actions, joint_ids=self._joint_ids)
+        self._target_write_pending = False

@@ -18,16 +18,12 @@ import unittest
 
 import torch
 
-from agile.rl_env.tests.utils import APP_IS_READY
+from isaaclab.utils.types import ArticulationActions
 
-if APP_IS_READY:
-    from isaaclab.utils.types import ArticulationActions
-
-    from agile.rl_env.mdp.actuators.actuators import DelayedDCMotor
-    from agile.rl_env.mdp.actuators.actuators_cfg import DelayedDCMotorCfg
+from agile.rl_env.mdp.actuators.actuators import DelayedDCMotor
+from agile.rl_env.mdp.actuators.actuators_cfg import DelayedDCMotorCfg
 
 
-@unittest.skipIf(not APP_IS_READY, "Application is not ready")
 class TestDelayedDCMotor(unittest.TestCase):
     def setUp(self) -> None:
         self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")

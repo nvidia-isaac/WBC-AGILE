@@ -17,7 +17,7 @@
 from dataclasses import MISSING
 
 from isaaclab.terrains.height_field.hf_terrains_cfg import HfTerrainBaseCfg
-from isaaclab.utils import configclass
+from isaaclab.utils.configclass import configclass
 
 from . import hf_terrains
 

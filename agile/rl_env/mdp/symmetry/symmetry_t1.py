@@ -28,6 +28,7 @@ from .observations import (
     lr_mirror_projected_gravity,
     mirror_base_com,
     mirror_external_force_torque,
+    mirror_flattened_observation_group,
     mirror_gait_cycle_commands,
     mirror_height_scan_feet_left_right,
     mirror_height_scan_left_right,
@@ -65,7 +66,7 @@ def lr_mirror_T1(
 
     if obs is not None:
         mirrored_obs = TensorDict(
-            {name: OBS_TO_MIRROR[name](obs[name], env) for name in obs.keys()},
+            {name: _mirror_observation(name, obs[name], env, obs_type) for name in obs.keys()},
             batch_size=obs.batch_size,
         )
         augmented_obs = torch.cat([obs, mirrored_obs], dim=0)
@@ -74,6 +75,16 @@ def lr_mirror_T1(
         augmented_obs = None
 
     return augmented_obs, augmented_actions
+
+
+def _mirror_observation(name: str, obs: torch.Tensor, env: ManagerBasedRLEnv, obs_type: str = "policy") -> torch.Tensor:
+    if name in OBS_TO_MIRROR:
+        return OBS_TO_MIRROR[name](obs, env)
+
+    if hasattr(env.unwrapped, "observation_manager") and name in env.unwrapped.observation_manager.active_terms:
+        return mirror_flattened_observation_group(obs, env, name, OBS_TO_MIRROR)
+
+    return mirror_flattened_observation_group(obs, env, obs_type, OBS_TO_MIRROR)
 
 
 def mirror_actions_T1(actions: torch.Tensor, env: ManagerBasedRLEnv) -> torch.Tensor:

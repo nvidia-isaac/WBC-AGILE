@@ -15,10 +15,12 @@
 
 
 from collections.abc import Sequence
+from typing import Any, Literal, overload
 
 import torch
 
 from isaaclab.envs import ManagerBasedRLEnv
+from isaaclab.managers import EventTermCfg, ManagerTermBase
 
 
 def pushing_curriculum(

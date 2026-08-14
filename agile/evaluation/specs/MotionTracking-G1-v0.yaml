@@ -1,0 +1,4 @@
+video_only: true
+fail_on_non_timeout_dones: true
+non_timeout_done_warmup_steps: 1
+sim2mujoco_scenario: agile/evaluation/scenarios/sim2mujoco_motion_tracking_g1.yaml

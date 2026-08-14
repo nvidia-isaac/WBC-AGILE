@@ -17,7 +17,7 @@
 import isaaclab.sim as sim_utils
 from isaaclab.managers import CommandTermCfg
 from isaaclab.markers import VisualizationMarkersCfg
-from isaaclab.utils import configclass
+from isaaclab.utils.configclass import configclass
 
 from .height_command import SmoothHeightCommand
 

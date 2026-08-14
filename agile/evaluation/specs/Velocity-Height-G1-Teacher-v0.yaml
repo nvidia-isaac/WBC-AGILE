@@ -1,0 +1,2 @@
+metric_suite: motion_tracking
+scenario: agile/algorithms/evaluation/configs/default_eval.yaml

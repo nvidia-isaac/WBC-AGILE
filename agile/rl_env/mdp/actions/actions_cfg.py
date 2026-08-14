@@ -19,7 +19,7 @@ from typing import Literal
 
 from isaaclab.envs import mdp
 from isaaclab.managers.action_manager import ActionTerm, ActionTermCfg  # noqa: F401
-from isaaclab.utils import configclass  # noqa: F401
+from isaaclab.utils.configclass import configclass  # noqa: F401
 
 # pyright: reportGeneralTypeIssues=false
 from agile.rl_env.mdp.actions.harness_action import HarnessAction
@@ -37,6 +37,7 @@ from .velocity_profiles import (
     EMAVelocityProfileCfg,
     VelocityProfileBaseCfg,
 )  # noqa: F401, E402
+
 
 ##
 # Joint actions.
@@ -75,6 +76,9 @@ class RandomActionCfg(mdp.JointActionCfg):
 
     no_random_when_walking: bool = False
     """If True, no randomization will be applied when the robot is walking. Defaults to False."""
+
+    randomize: bool = True
+    """Whether to sample targets. If False, the term holds the articulation's default joint positions."""
 
     joint_pos_limits: dict[str, tuple[float, float]] | None = None
     """Dictionary mapping joint names to custom position limits (lower_limit, upper_limit).
@@ -133,8 +137,8 @@ class HarnessActionCfg(ActionTermCfg):
     """The force limit of the harness. Defaults to 0.0."""
     torque_limit: float = 0.0
     """The torque limit of the harness. Defaults to 0.0."""
-    target_quat: tuple[float, float, float, float] = (1.0, 0.0, 0.0, 0.0)  # w, x, y, z
-    """The target orientation of the harness in quaternion format. Defaults to (1.0, 0.0, 0.0, 0.0)."""
+    target_quat: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 1.0)  # (x, y, z, w)
+    """The target orientation of the harness as an (x, y, z, w) quaternion. Defaults to identity (0.0, 0.0, 0.0, 1.0)."""
     height_sensor: str = "height_measurement_sensor"
     """The name of the height sensor to use for the harness action. Defaults to "height measurement_sensor"."""
     target_height: float = 0.72

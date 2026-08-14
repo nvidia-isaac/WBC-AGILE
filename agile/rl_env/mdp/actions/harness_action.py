@@ -122,12 +122,12 @@ class HarnessAction(ActionTerm):
             Torque tensor [N, 1, 3] with z-component = 0
         """
         target_quat = self._target_quat.repeat(self.num_envs, 1)
-        current_quat = self._asset.data.root_quat_w
+        current_quat = self._asset.data.root_quat_w.torch
         q_err = math_utils.quat_mul(math_utils.quat_conjugate(current_quat), target_quat)
-        error = 2.0 * torch.sign(q_err[:, 0:1]) * q_err[:, 1:]
+        error = 2.0 * torch.sign(q_err[:, 3:4]) * q_err[:, 0:3]  # (x,y,z,w): scalar idx 3, vec 0:3
 
         # PD control
-        torque = self.stiffness_torques * error - self.damping_torques * self._asset.data.root_ang_vel_b
+        torque = self.stiffness_torques * error - self.damping_torques * self._asset.data.root_ang_vel_b.torch
         torque[:, 2] = 0.0  # No yaw assistance from stabilization
         torque = torch.clamp(torque, -self._torque_limit, self._torque_limit)
 
@@ -141,7 +141,7 @@ class HarnessAction(ActionTerm):
         """
         # Measure current height
         height_rays = self._height_sensor.data.ray_hits_w[..., 2]
-        root_z = self._asset.data.root_pos_w[:, 2].unsqueeze(1)
+        root_z = self._asset.data.root_pos_w.torch[:, 2].unsqueeze(1)
         current_height = -torch.mean(height_rays - root_z, dim=-1).unsqueeze(1)
 
         # Get target height from command or config
@@ -152,7 +152,7 @@ class HarnessAction(ActionTerm):
 
         # Height error and velocity
         height_error = target_height - current_height
-        z_velocity = self._asset.data.root_lin_vel_b[:, 2].unsqueeze(1)
+        z_velocity = self._asset.data.root_lin_vel_b.torch[:, 2].unsqueeze(1)
 
         # PD control
         force_z = self.stiffness_forces * height_error - self.damping_forces * z_velocity

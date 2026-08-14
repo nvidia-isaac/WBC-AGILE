@@ -1,86 +1,65 @@
 #!/usr/bin/env python3
-# Copyright (c) 2025, NVIDIA CORPORATION. All rights reserved.
-#
-# NVIDIA CORPORATION and its licensors retain all intellectual property
-# and proprietary rights in and to this software, related documentation
-# and any modifications thereto. Any use, reproduction, disclosure or
-# distribution of this software and related documentation without an express
-# license agreement from NVIDIA CORPORATION is strictly prohibited.
+# SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
 
-"""Verification script for custom rsl_rl installation.
+"""Verify that the pinned public rsl-rl-lib wheel has AGILE's patch applied."""
 
-This script ensures that the custom rsl_rl package (with TensorDict support)
-is correctly installed and takes precedence over Isaac Lab's bundled version.
+from __future__ import annotations
 
-Usage:
-    ${ISAACLAB_PATH}/isaaclab.sh -p scripts/verify_rsl_rl.py
-
-The script will exit with code 0 if successful, 1 if verification fails.
-"""
-
+import importlib.metadata
 import importlib.util
-import subprocess
+import pathlib
 import sys
 
+EXPECTED_VERSION = "5.4.1"
 
-def check_rsl_rl():
-    """Check which rsl_rl is being used and verify it has TensorDict support."""
 
-    # First check what's installed via pip
-    print("Checking installed packages...")
+def _ensure_rsl_rl_patch() -> None:
+    bootstrap_path = pathlib.Path(__file__).resolve().parents[1] / "agile" / "rl_env" / "rsl_rl" / "bootstrap.py"
+    spec = importlib.util.spec_from_file_location("agile_rsl_rl_bootstrap", bootstrap_path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"Failed to load AGILE RSL-RL bootstrap from {bootstrap_path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    module.ensure_rsl_rl_patch()
+
+
+def check_rsl_rl() -> bool:
+    """Check that rsl_rl resolves to 5.4.1 with AGILE additions."""
     try:
-        result = subprocess.run(["pip", "list", "--format=freeze"], capture_output=True, text=True, check=True)
-        for line in result.stdout.split("\n"):
-            if "rsl" in line.lower() and "rl" in line.lower():
-                print(f"  Found: {line}")
-    except Exception as e:
-        print(f"  Could not check pip list: {e}")
-
-    print("\nChecking rsl_rl import...")
-    try:
-        # Import rsl_rl and check its location
+        _ensure_rsl_rl_patch()
         import rsl_rl
-
-        print("✓ rsl_rl imported successfully")
-        print(f"  Module location: {rsl_rl.__file__}")
-
-        # Check if it's in the expected custom location
-        if "/workspace/agile/agile/algorithms/rsl_rl" in str(rsl_rl.__file__):
-            print("✓ Using custom rsl_rl from agile/algorithms/rsl_rl")
-        elif "site-packages" in str(rsl_rl.__file__):
-            print("⚠ Using rsl_rl from site-packages (might be Isaac Lab's version)")
-
-        # Check if it's the custom version by looking for TensorDict import
-        runner_spec = importlib.util.find_spec("rsl_rl.runners.on_policy_runner")
-        if runner_spec and runner_spec.origin:
-            print(f"  on_policy_runner location: {runner_spec.origin}")
-
-            # Check if the file contains TensorDict import (indicating custom version)
-            with open(runner_spec.origin) as f:
-                content = f.read()
-                if "from tensordict.tensordict import TensorDict" in content:
-                    print("✓ Custom rsl_rl version detected (has TensorDict support)")
-                    return True
-                else:
-                    print("✗ Standard rsl_rl version detected (no TensorDict support)")
-                    print("  This appears to be the Isaac Lab bundled version")
-                    print("  The custom version should be installed from agile/algorithms/rsl_rl")
-                    return False
-        else:
-            print("✗ Could not find on_policy_runner module")
-            return False
-
-    except ImportError as e:
-        print(f"✗ Failed to import rsl_rl: {e}")
+        from rsl_rl.models import JitTeacherModel
+        from rsl_rl.modules import ReturnVarianceNormalization
+        from rsl_rl.runners import DistillationRunner, OnPolicyRunner
+    except Exception as exc:
+        print(f"FAIL: Failed to apply or import patched rsl_rl additions: {exc}")
         return False
+
+    module_path = pathlib.Path(rsl_rl.__file__).resolve()
+    print("OK: rsl_rl imported successfully")
+    print(f"  Module location: {module_path}")
+
+    version = importlib.metadata.version("rsl-rl-lib")
+    print(f"  Installed rsl-rl-lib version: {version}")
+    if version != EXPECTED_VERSION:
+        print(f"FAIL: Expected rsl-rl-lib=={EXPECTED_VERSION}")
+        return False
+
+    if "agile/algorithms/rsl_rl" in module_path.as_posix():
+        print("FAIL: rsl_rl is still imported from the removed vendored package")
+        return False
+
+    print(f"OK: Found AGILE JIT teacher model: {JitTeacherModel.__name__}")
+    print(f"OK: Found AGILE reward normalizer: {ReturnVarianceNormalization.__name__}")
+    print(f"OK: Found rsl_rl runners: {OnPolicyRunner.__name__}, {DistillationRunner.__name__}")
+    return True
 
 
 if __name__ == "__main__":
-    success = check_rsl_rl()
-    if not success:
-        print("\n⚠ Installation verification failed!")
-        print("The custom rsl_rl package was not properly installed.")
+    if not check_rsl_rl():
+        print("\nFAIL: Installation verification failed.")
         sys.exit(1)
-    else:
-        print("\n✓ Installation verified successfully!")
-        sys.exit(0)
+
+    print("\nOK: Installation verified successfully.")
+    sys.exit(0)

@@ -21,7 +21,7 @@ from dataclasses import MISSING
 from isaaclab.managers import CommandTermCfg
 from isaaclab.markers import VisualizationMarkersCfg
 from isaaclab.markers.config import FRAME_MARKER_CFG
-from isaaclab.utils import configclass
+from isaaclab.utils.configclass import configclass
 
 from agile.rl_env.mdp.commands.motion_tracking_commands import MotionCommand
 

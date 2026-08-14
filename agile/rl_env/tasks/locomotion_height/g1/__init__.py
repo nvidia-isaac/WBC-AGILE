@@ -22,7 +22,7 @@ from . import agents
 ###########
 
 gym.register(
-    id="Velocity-Height-G1-v0",
+    id="Velocity-Height-G1-Teacher-v0",
     entry_point="isaaclab.envs:ManagerBasedRLEnv",
     disable_env_checker=True,
     kwargs={
@@ -31,13 +31,26 @@ gym.register(
     },
 )
 
+##########################
+# Direct History Training #
+##########################
+
+gym.register(
+    id="Velocity-Height-G1-History-v0",
+    entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": f"{__name__}.velocity_height_env_cfg:G1VelocityHeightHistoryEnvCfg",
+        "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_rl_ppo_cfg:G1VelocityHeightHistoryPpoRunnerCfg",
+    },
+)
 
 ################################
 # Teacher-Student Distillation #
 ################################
 
 gym.register(
-    id="Velocity-Height-G1-Distillation-Recurrent-v0",
+    id="Velocity-Height-G1-Student-Recurrent-v0",
     entry_point="isaaclab.envs:ManagerBasedRLEnv",
     disable_env_checker=True,
     kwargs={
@@ -47,7 +60,7 @@ gym.register(
 )
 
 gym.register(
-    id="Velocity-Height-G1-Distillation-History-v0",
+    id="Velocity-Height-G1-Student-History-v0",
     entry_point="isaaclab.envs:ManagerBasedRLEnv",
     disable_env_checker=True,
     kwargs={

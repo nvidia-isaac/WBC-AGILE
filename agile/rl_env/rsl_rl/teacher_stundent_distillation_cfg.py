@@ -19,7 +19,7 @@ from __future__ import annotations
 from dataclasses import MISSING
 from typing import Literal
 
-from isaaclab.utils import configclass
+from isaaclab.utils.configclass import configclass
 
 from .symmetry_cfg import RslRlSymmetryCfg
 
@@ -30,7 +30,7 @@ from .symmetry_cfg import RslRlSymmetryCfg
 
 @configclass
 class RslRlStudentTrainedTeacherCfg:
-    """Configuration for the student trained teacher networks."""
+    """Configuration for the student trained teacher networks (pre-trained teacher from file)."""
 
     class_name: str = "StudentTrainedTeacher"
     """The policy class name. Default is StudentTrainedTeacher."""
@@ -44,6 +44,9 @@ class RslRlStudentTrainedTeacherCfg:
     activation: str = "elu"
     """The activation function for the student network."""
 
+    dropout_rate: float = 0.0
+    """Dropout rate for MLP layers in the student network. Default is 0.0 (no dropout)."""
+
 
 ############################
 # Algorithm configurations #
@@ -55,7 +58,7 @@ class RslRlDistillationAlgorithmCfg:
     """Configuration for the distillation algorithm."""
 
     class_name: str = "Distillation"
-    """The algorithm class name. Default is PPO."""
+    """The algorithm class name. Default is Distillation."""
 
     num_learning_epochs: int = MISSING
     """The number of learning epochs per update."""
@@ -69,8 +72,14 @@ class RslRlDistillationAlgorithmCfg:
     max_grad_norm: float = MISSING
     """The maximum gradient norm."""
 
-    loss_type: Literal["mse", "l1"] = "mse"
-    """The type of loss function to use."""
+    loss_type: Literal["mse", "huber"] = "mse"
+    """The type of loss function to use. Options: 'mse' or 'huber'."""
+
+    # Regularization parameters
+    weight_decay: float = 0.0
+    """L2 regularization strength (weight decay) for the optimizer. Default is 0.0 (no regularization).
+
+    Typical values: 1e-5 to 1e-3. Higher values provide stronger regularization."""
 
     symmetry_cfg: RslRlSymmetryCfg | None = None
     """Configuration for symmetry-based training. Default is None.

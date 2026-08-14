@@ -82,11 +82,12 @@ class TrackingCommand(CommandTerm):
 
         self.num_timesteps = len(qpos_data)
         self.pos_trajectory_w = qpos_data[:, :3] + torch.tensor(cfg.pos_offset, dtype=torch.float, device=self.device)
-        self.quat_trajectory_w = qpos_data[:, 3:7]
+        # The YAML stores quaternions in (w, x, y, z); Isaac Lab 3.0 uses (x, y, z, w).
+        self.quat_trajectory_w = math_utils.convert_quat(qpos_data[:, 3:7], to="xyzw")
         self.object_pos_trajectory_w = object_position + torch.tensor(
             cfg.pos_offset, dtype=torch.float, device=self.device
         )
-        self.object_quat_trajectory_w = object_wxyz
+        self.object_quat_trajectory_w = math_utils.convert_quat(object_wxyz, to="xyzw")
 
         # Precompute object height peak for phase detection in rewards
         # This identifies when the object reaches maximum height (grasp/lift peak)
@@ -105,7 +106,7 @@ class TrackingCommand(CommandTerm):
         tracked_joint_ids_set = set(self.tracked_joint_ids)
         self.other_joint_ids = [jid for jid in all_joint_ids if jid not in tracked_joint_ids_set]
         if len(self.other_joint_ids) > 0:
-            self.default_other_joint_pos = self.robot.data.default_joint_pos[:, self.other_joint_ids].clone()
+            self.default_other_joint_pos = self.robot.data.default_joint_pos.torch[:, self.other_joint_ids].clone()
         else:
             self.default_other_joint_pos = None
 
@@ -169,7 +170,7 @@ class TrackingCommand(CommandTerm):
         Returns zeros if object_name is not configured.
         """
         if self.object is not None:
-            return self.object.data.root_pos_w
+            return self.object.data.root_pos_w.torch
         return torch.zeros(self.num_envs, 3, device=self.device)
 
     @property
@@ -179,22 +180,23 @@ class TrackingCommand(CommandTerm):
         Returns identity quaternion if object_name is not configured.
         """
         if self.object is not None:
-            return self.object.data.root_quat_w
-        return torch.tensor([[1.0, 0.0, 0.0, 0.0]], device=self.device).repeat(self.num_envs, 1)
+            return self.object.data.root_quat_w.torch
+        # Identity quaternion (x, y, z, w) to match Isaac Lab 3.0's convention.
+        return torch.tensor([[0.0, 0.0, 0.0, 1.0]], device=self.device).repeat(self.num_envs, 1)
 
     @property
     def robot_anchor_pos_w(self) -> torch.Tensor:
         """The robot anchor position in world frame. Shape is (num_envs, 3)."""
         if self._anchor_body_id is not None:
-            return self.robot.data.body_pos_w[:, self._anchor_body_id, :]
-        return self.robot.data.root_pos_w
+            return self.robot.data.body_pos_w.torch[:, self._anchor_body_id, :]
+        return self.robot.data.root_pos_w.torch
 
     @property
     def robot_anchor_quat_w(self) -> torch.Tensor:
         """The robot anchor quaternion in world frame. Shape is (num_envs, 4)."""
         if self._anchor_body_id is not None:
-            return self.robot.data.body_quat_w[:, self._anchor_body_id, :]
-        return self.robot.data.root_quat_w
+            return self.robot.data.body_quat_w.torch[:, self._anchor_body_id, :]
+        return self.robot.data.root_quat_w.torch
 
     @property
     def robot_anchor_yaw_w(self) -> torch.Tensor:
@@ -204,7 +206,7 @@ class TrackingCommand(CommandTerm):
     @property
     def robot_tracked_joint_pos(self) -> torch.Tensor:
         """The robot tracked joint positions. Shape is (num_envs, num_tracked_joints)."""
-        return self.robot.data.joint_pos[..., self.tracked_joint_ids]
+        return self.robot.data.joint_pos.torch[..., self.tracked_joint_ids]
 
     @property
     def command(self) -> torch.Tensor:
@@ -224,10 +226,10 @@ class TrackingCommand(CommandTerm):
 
     def _update_metrics(self) -> None:
         """Update the metrics."""
-        self.metrics["position_error"] = torch.norm(self.robot.data.root_pos_w - self.command_anchor_pos_w, dim=1)
+        self.metrics["position_error"] = torch.norm(self.robot.data.root_pos_w.torch - self.command_anchor_pos_w, dim=1)
 
         self.metrics["orientation_error"] = math_utils.quat_error_magnitude(
-            self.robot.data.root_quat_w, self.quat_command_e
+            self.robot.data.root_quat_w.torch, self.quat_command_e
         )
 
         joint_pos_error = self.robot_tracked_joint_pos - self.tracked_joint_pos_command
@@ -243,7 +245,7 @@ class TrackingCommand(CommandTerm):
     def _update_command(self) -> None:
         """Update the command."""
         if self.cfg.update_goal_on_reach:
-            pos_error = torch.norm(self.robot.data.root_pos_w - self.command_anchor_pos_w, dim=1)
+            pos_error = torch.norm(self.robot.data.root_pos_w.torch - self.command_anchor_pos_w, dim=1)
             reached = pos_error < self.cfg.goal_reach_threshold
             self.timestep_counter[reached] += 1
         else:

@@ -6,8 +6,8 @@ AGILE is an [external Isaac Lab project](https://isaac-sim.github.io/IsaacLab/ma
 
 <table align="center">
   <tr>
-    <th colspan="2">Booster T1 – Stand-Up</th>
-    <th colspan="2">Booster T1 – Velocity Tracking</th>
+    <th colspan="2">Booster T1 - Stand-Up</th>
+    <th colspan="2">Booster T1 - Velocity Tracking</th>
   </tr>
   <tr>
     <td align="center"><img src="booster_t1_stand_up_sim2sim.gif" width="240"><br><em>Sim</em></td>
@@ -16,8 +16,8 @@ AGILE is an [external Isaac Lab project](https://isaac-sim.github.io/IsaacLab/ma
     <td align="center"><img src="booster_t1_vel_sim2real.gif" width="240"><br><em>Real</em></td>
   </tr>
   <tr>
-    <th colspan="2">Unitree G1 – Velocity-Height Tracking</th>
-    <th colspan="2">Unitree G1 – Sit-Down / Stand-Up</th>
+    <th colspan="2">Unitree G1 - Velocity-Height Tracking</th>
+    <th colspan="2">Unitree G1 - Sit-Down / Stand-Up</th>
   </tr>
   <tr>
     <td align="center"><img src="unitree_g1_vel_height_sim2sim.gif" width="240"><br><em>Sim</em></td>
@@ -26,8 +26,8 @@ AGILE is an [external Isaac Lab project](https://isaac-sim.github.io/IsaacLab/ma
     <td align="center"><img src="unitree_g1_updown.gif" width="240"><br><em>Real</em></td>
   </tr>
   <tr>
-    <th colspan="2">Unitree G1 – Teleoperation</th>
-    <th colspan="2">Unitree G1 – Dancing</th>
+    <th colspan="2">Unitree G1 - Teleoperation</th>
+    <th colspan="2">Unitree G1 - Dancing</th>
   </tr>
   <tr>
     <td align="center"><img src="locomanipulation-g1-sim.gif" width="240"><br><em>Sim</em></td>
@@ -52,10 +52,10 @@ AGILE is an [external Isaac Lab project](https://isaac-sim.github.io/IsaacLab/ma
 
 ```bash
 # Train a velocity tracking policy
-python scripts/train.py --task Velocity-T1-v0 --num_envs 2048 --headless
+uv run scripts/train.py --task Velocity-T1-v0 --num_envs 2048 --headless
 
 # Evaluate the trained policy
-python scripts/eval.py --task Velocity-T1-v0 --num_envs 32 --checkpoint <path>
+uv run scripts/eval.py --task Velocity-T1-v0 --num_envs 32 --checkpoint <path>
 ```
 
 See {doc}`getting-started` for full installation and setup instructions.
@@ -65,10 +65,10 @@ See {doc}`getting-started` for full installation and setup instructions.
 | Category | Task IDs | Description |
 |----------|----------|-------------|
 | **Locomotion** | `Velocity-T1-v0`, `Velocity-G1-History-v0` | Lower-body velocity tracking on rough terrain |
-| **Locomotion + Height** | `Velocity-Height-G1-v0`, distillation variants | Lower-body velocity + height tracking with teacher-student distillation |
+| **Locomotion + Height** | `Velocity-Height-G1-History-v0`, distillation variants | Lower-body velocity + height tracking with teacher-student distillation |
 | **Stand Up** | `StandUp-T1-v0` | Full-body recovery from fallen poses (unified whole-body policy) |
-| **Pick & Place** | `G1-PickPlace-Tracking-v0` | Upper-body trajectory tracking with frozen lower-body locomotion policy |
-| **Whole-Body Motion Tracking** | `Tracking-Flat-G1-v0` | Full-body motion imitation from reference trajectories (e.g., dancing) |
+| **Pick & Place** | `PickPlace-G1-v0` | Upper-body trajectory tracking with frozen lower-body locomotion policy |
+| **Whole-Body Motion Tracking** | `MotionTracking-G1-v0` | Full-body motion imitation from reference trajectories (e.g., dancing) |
 | **Debug** | `Debug-G1-v0`, `Debug-T1-v0` | Interactive GUI environments for debugging |
 
 See {doc}`tasks` for detailed task documentation.
@@ -99,7 +99,8 @@ data-recording
 :caption: Deployment
 :hidden:
 
-pretrained-policies
+Pre-trained Policies <pretrained-policies>
+Deploy Policies with LEAPP <deploy-policies>
 sim2mujoco
 ```
 
@@ -110,6 +111,8 @@ sim2mujoco
 
 remote-training
 testing
+AGILE v1.3.0 <releases/v1.3.0>
+Release note template <releases/_template>
 ```
 
 ```{toctree}

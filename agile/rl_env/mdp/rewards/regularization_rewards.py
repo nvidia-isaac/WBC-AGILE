@@ -17,6 +17,7 @@
 from collections.abc import Sequence
 
 import torch
+import warp as wp
 
 from isaaclab.assets import Articulation
 from isaaclab.envs import ManagerBasedRLEnv
@@ -24,7 +25,7 @@ from isaaclab.envs.mdp.rewards import action_l2
 from isaaclab.managers import ManagerTermBase, SceneEntityCfg
 from isaaclab.managers.manager_term_cfg import RewardTermCfg
 
-from agile.rl_env.mdp.utils import get_contact_sensor_cfg, get_robot_cfg
+from agile.rl_env.mdp.utils import get_contact_sensor_cfg, get_joint_indices, get_robot_cfg
 
 
 def relax_if_null_cmd(
@@ -38,7 +39,7 @@ def relax_if_null_cmd(
     command_term = env.command_manager.get_term(command_name)
     is_null_cmd = (command_term.command[:, :3] == 0).all(dim=1)
 
-    torques = torch.sum(torch.square(asset.data.applied_torque[:, asset_cfg.joint_ids]), dim=1)
+    torques = torch.sum(torch.square(asset.data.applied_torque.torch[:, asset_cfg.joint_ids]), dim=1)
 
     penalty = torch.where(is_null_cmd, torques, 0.0)
 
@@ -68,7 +69,9 @@ class relax_if_null_cmd_exp(ManagerTermBase):
         # Cache torque limits once during initialization (avoid CPU->GPU transfer every step)
         asset_cfg = cfg.params.get("asset_cfg", SceneEntityCfg("robot"))
         asset = env.scene[asset_cfg.name]
-        self.torque_limits = asset.root_physx_view.get_dof_max_forces()[:, asset_cfg.joint_ids].to(env.device)
+        _max_forces = asset.root_physx_view.get_dof_max_forces()
+        _max_forces = wp.to_torch(_max_forces) if isinstance(_max_forces, wp.array) else _max_forces
+        self.torque_limits = _max_forces[:, asset_cfg.joint_ids].to(env.device)
 
     def __call__(
         self,
@@ -99,7 +102,7 @@ class relax_if_null_cmd_exp(ManagerTermBase):
         is_null_cmd = (command_term.command[:, :3] == 0).all(dim=1)
 
         # Calculate normalized torque magnitude using cached limits
-        torques = asset.data.applied_torque[:, asset_cfg.joint_ids]
+        torques = asset.data.applied_torque.torch[:, asset_cfg.joint_ids]
         normalized_torques = torques / (self.torque_limits + 1e-6)
 
         # Compute RMS (root mean square) of normalized torques
@@ -138,7 +141,7 @@ def joint_pos_tracking_error_l2(
     robot: Articulation = env.scene[asset_cfg.name]
     action_term = env.action_manager._terms[action_name]
     target = action_term.processed_actions  # (num_envs, num_joints) — the actual PD position target
-    current = robot.data.joint_pos[:, action_term._joint_ids]
+    current = robot.data.joint_pos.torch[:, action_term._joint_ids]
     return torch.sum(torch.square(target - current), dim=1)
 
 
@@ -167,7 +170,10 @@ def joint_deviation_l1(
     """Reward for penalizing joint deviation from default angles (L1 norm)."""
     robot, robot_cfg = get_robot_cfg(env, robot_cfg)
     return torch.sum(
-        torch.abs(robot.data.joint_pos[:, robot_cfg.joint_ids] - robot.data.default_joint_pos[:, robot_cfg.joint_ids]),
+        torch.abs(
+            robot.data.joint_pos.torch[:, robot_cfg.joint_ids]
+            - robot.data.default_joint_pos.torch[:, robot_cfg.joint_ids]
+        ),
         dim=1,
     )
 
@@ -180,7 +186,8 @@ def joint_deviation_l2(
     robot, robot_cfg = get_robot_cfg(env, robot_cfg)
     return torch.sum(
         torch.square(
-            robot.data.joint_pos[:, robot_cfg.joint_ids] - robot.data.default_joint_pos[:, robot_cfg.joint_ids]
+            robot.data.joint_pos.torch[:, robot_cfg.joint_ids]
+            - robot.data.default_joint_pos.torch[:, robot_cfg.joint_ids]
         ),
         dim=1,
     )
@@ -208,7 +215,7 @@ def contact_forces_l2(
     contact_sensor, sensor_cfg = get_contact_sensor_cfg(env, sensor_cfg)
 
     # Get contact forces for these bodies.
-    net_contact_forces = contact_sensor.data.net_forces_w
+    net_contact_forces = contact_sensor.data.net_forces_w.torch
 
     # Get forces for the specified bodies
     # Shape: [num_envs, num_bodies, 3]
@@ -257,10 +264,13 @@ def torque_limits(
     robot, robot_cfg = get_robot_cfg(env, robot_cfg)
 
     # Get joint torques
-    joint_torques = robot.data.applied_torque
+    joint_torques = robot.data.applied_torque.torch
 
     # Get joint torque limits
     joint_torque_limits = robot.root_physx_view.get_dof_max_forces()
+    joint_torque_limits = (
+        wp.to_torch(joint_torque_limits) if isinstance(joint_torque_limits, wp.array) else joint_torque_limits
+    )
 
     # Extract specified joint torques and limits
     selected_joint_torques = joint_torques[:, robot_cfg.joint_ids]

@@ -5,11 +5,33 @@ ARG RESUME_CHECKPOINT
 ARG RESUME_STAGE=no
 
 ###############################
-# Base Stage
+# Base Stage - Isaac Lab v3.0.0-beta2
 ###############################
-FROM nvcr.io/nvidia/isaac-lab:2.3.2 AS base
+# Uses the published Isaac Lab beta2 image and installs AGILE into a locked uv environment.
+# x86_64 only - the OSMO GPU pools are x86_64.
+FROM nvcr.io/nvidia/isaac-lab:3.0.0-beta2 AS base
 
-# Fix potential Vulkan conflicts
+COPY --from=ghcr.io/astral-sh/uv:0.9.5 /uv /uvx /usr/local/bin/
+
+ENV ISAACLAB_PATH=/workspace/isaaclab
+ENV UV_CACHE_DIR=/opt/uv-cache
+ENV UV_LINK_MODE=copy
+ENV UV_PROJECT_ENVIRONMENT=/workspace/agile/.venv
+ENV LANG=C.UTF-8
+ENV DEBIAN_FRONTEND=noninteractive
+ENV ACCEPT_EULA=Y
+ENV OMNI_KIT_ACCEPT_EULA=YES
+ENV TERM=xterm
+USER root
+
+# System dependencies used by AGILE workflows.
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+    git-lfs \
+    patch && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# Fix potential Vulkan conflicts.
 RUN if [ -e "/usr/share/vulkan" ] && [ -e "/etc/vulkan" ]; then \
       mv /usr/share/vulkan /usr/share/vulkan_hidden; \
     fi
@@ -17,54 +39,40 @@ RUN if [ -e "/usr/share/vulkan" ] && [ -e "/etc/vulkan" ]; then \
 WORKDIR /workspace/agile
 
 ###############################
-# Install Python Dependencies
+# Install AGILE dependencies from the locked uv environment
 ###############################
-# IMPORTANT: We must install directly into Isaac Lab's Python environment
-# using ${ISAACLAB_PATH}/isaaclab.sh -p to ensure compatibility
-RUN ${ISAACLAB_PATH}/isaaclab.sh -p -m pip install --no-cache-dir \
-    tensordict==0.8.3 \
-    datasets==2.19.0 \
-    wandb==0.22.2 \
-    mujoco \
-    importlib_metadata \
-    orjson \
-    pandas \
-    plotly \
-    jinja2 \
-    seaborn \
-    matplotlib
+# Only the dependency manifests are copied here so this expensive layer is keyed
+# solely on the locked dependency set. Editing AGILE source (or README.md) no
+# longer busts it. The BuildKit cache mount keeps uv's wheel cache on the builder
+# across builds, so even when the lock *does* change uv reuses already-downloaded
+# wheels (torch CUDA, isaacsim, ...) instead of re-downloading them. The cache
+# mount lives outside the image layers, so it never bloats the image and no
+# `uv cache clean` is needed (removing the mount without restoring a clean would
+# bake the cache into a layer, so keep the two together).
+COPY --chmod=0644 pyproject.toml uv.lock ./
+RUN --mount=type=cache,target=/opt/uv-cache \
+    uv sync --frozen --no-dev --no-install-project
 
 ###############################
-# Install Custom rsl_rl Package
+# Install AGILE source
 ###############################
-# Remove any pre-existing rsl_rl packages from Isaac Lab
-# These would conflict with our custom version that has TensorDict support
-RUN ${ISAACLAB_PATH}/isaaclab.sh -p -m pip uninstall -y rsl_rl rsl-rl-lib 2>/dev/null || true
-
-# Copy and install our custom rsl_rl package
-COPY scripts/setup/install_deps.sh scripts/setup/install_deps.sh
-COPY pyproject.toml .
-COPY agile/algorithms/rsl_rl agile/algorithms/rsl_rl
-RUN ./scripts/setup/install_deps.sh
-
-# Verify correct installation
-COPY scripts/verify_rsl_rl.py scripts/verify_rsl_rl.py
-RUN ${ISAACLAB_PATH}/isaaclab.sh -p scripts/verify_rsl_rl.py
-
-# Install the rest of the code
 COPY \
   --exclude=.git/ \
+  --exclude=.venv/ \
   --exclude=.vscode/ \
   --exclude=wandb/ \
   --exclude=.mypy_cache/ \
   --exclude=.pytest_cache/ \
   --exclude=build/ \
-  --exclude=scripts/setup/ \
   --exclude=logs/ \
   --exclude=outputs/ \
-  --exclude=pyproject.toml \
   --exclude=workflows/ \
   . /workspace/agile
+RUN --mount=type=cache,target=/opt/uv-cache \
+    uv sync --frozen --no-dev
+
+# Verify and apply AGILE's public rsl-rl-lib compatibility patch during image build.
+RUN uv run --frozen scripts/verify_rsl_rl.py
 
 ###############################
 # Resume Policy Stage (conditionally named)

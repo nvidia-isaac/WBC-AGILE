@@ -24,6 +24,7 @@ from .command_provider import CommandProvider, MotionCommandProvider, VelocityCo
 from .command_scheduler import Sim2MuJoCoCommandScheduler
 from .commands import CommandManager
 from .data_logger import Sim2MuJoCoDataLogger
+from .leapp import LeappPolicyController, resolve_leapp_bundle
 from .observations import ObservationProcessor
 from .policy import PolicyWrapper
 from .simulation import JointCommand, MuJocoSimulation, SimState
@@ -45,6 +46,8 @@ __all__ = [
     "create_command_provider",
     "Sim2MuJoCoCommandScheduler",
     "Sim2MuJoCoDataLogger",
+    "LeappPolicyController",
+    "resolve_leapp_bundle",
     "load_config",
     "default_device",
 ]

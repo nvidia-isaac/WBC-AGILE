@@ -44,8 +44,8 @@ def angular_velocity_from_quats(q1: torch.Tensor, q2: torch.Tensor, dt: float):
     Calculate the angular velocity of a body given two consecutive quaternions.
 
     Args:
-        q1: The first quaternion in (w, x, y, z). Shape is (N, 4).
-        q2: The second quaternion in (w, x, y, z). Shape is (N, 4).
+        q1: The first quaternion in (x, y, z, w). Shape is (N, 4).
+        q2: The second quaternion in (x, y, z, w). Shape is (N, 4).
         dt: The time step between the two quaternions.
 
     Returns:
@@ -71,7 +71,7 @@ def quat_from_axis(axis: torch.Tensor) -> torch.Tensor:
 
     Returns:
         A tensor representing the quaternion corresponding to the given axis-angle,
-        with shape (..., 4) in (w, x, y, z) format.
+        with shape (..., 4) in (x, y, z, w) format.
     """
     assert axis.shape[-1] == 3
     angle = torch.linalg.norm(axis, dim=-1)
@@ -90,7 +90,7 @@ def angle_from_quat(quat: torch.Tensor) -> torch.Tensor:
     Returns:
         A tensor of shape (...) representing the angle in radians.
     """
-    w = quat[..., 0]
+    w = quat[..., 3]
     angle = 2.0 * torch.acos(w)
     return angle
 
@@ -101,7 +101,7 @@ def angle_along_axis_from_quat(quat: torch.Tensor, axis: torch.Tensor) -> torch.
     Compute the angle along an axis from a quaternion.
 
     Args:
-        quat: A tensor of shape (..., 4) representing the quaternion in (w,x,y,z) format.
+        quat: A tensor of shape (..., 4) representing the quaternion in (x,y,z,w) format.
         axis: A tensor of shape (..., 3) representing the axis of rotation. Should be
             normalized.
 
@@ -110,8 +110,8 @@ def angle_along_axis_from_quat(quat: torch.Tensor, axis: torch.Tensor) -> torch.
         specified axis.
     """
     # Extract quaternion components
-    w = quat[..., 0]
-    v = quat[..., 1:]  # x,y,z components
+    w = quat[..., 3]
+    v = quat[..., :3]  # x,y,z components
 
     # Project quaternion vector onto axis
     v_proj = torch.sum(v * axis, dim=-1)
@@ -128,7 +128,7 @@ def quat_to_tangent_normal(quat: torch.Tensor) -> torch.Tensor:
     Convert a quaternion to a tangent and normal vector representation.
 
     Args:
-        quat: A tensor of shape (..., 4) representing the quaternion in (w,x,y,z) format.
+        quat: A tensor of shape (..., 4) representing the quaternion in (x,y,z,w) format.
 
     Returns:
         A tensor of shape (..., 6) representing the tangent and normal vectors.
@@ -172,7 +172,7 @@ def euler_xyz_from_quat(
         The euler angles are assumed in XYZ convention.
 
     Args:
-        quat: The quaternion orientation in (w, x, y, z). Shape is (..., 4).
+        quat: The quaternion orientation in (x, y, z, w). Shape is (..., 4).
 
     Returns:
         A tuple containing roll-pitch-yaw. Each element is a tensor of shape (...,).
@@ -180,7 +180,7 @@ def euler_xyz_from_quat(
     Reference:
         https://en.wikipedia.org/wiki/Conversion_between_quaternions_and_Euler_angles
     """
-    q_w, q_x, q_y, q_z = quat[..., 0], quat[..., 1], quat[..., 2], quat[..., 3]
+    q_x, q_y, q_z, q_w = quat[..., 0], quat[..., 1], quat[..., 2], quat[..., 3]
     # roll (x-axis rotation)
     sin_roll = 2.0 * (q_w * q_x + q_y * q_z)
     cos_roll = 1 - 2 * (q_x * q_x + q_y * q_y)

@@ -19,9 +19,6 @@ agile/rl_env/assets/unitree_mujoco/
 
 fallen_states_cache/
 
-.venv/
-uv.lock
-
 docs/build/
-
-CLAUDE.md
+.venv/
+.agile_python/

@@ -13,7 +13,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from .contact_sensor_data_patch import *  # noqa: F403
-from .contact_sensor_patch import *  # noqa: F403
+from . import (
+    physx_articulation_com_cache,  # noqa: F401
+    terrain_importer_plane_patch,  # noqa: F401
+)
 from .manager_based_rl_env_patch import *  # noqa: F403
 from .observation_manager_patch import *  # noqa: F403

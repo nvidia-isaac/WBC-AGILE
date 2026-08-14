@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from isaaclab.utils import configclass
+from isaaclab.utils.configclass import configclass
 
 from agile.rl_env.mdp.symmetry import lr_mirror_G1  # noqa: F401
 from agile.rl_env.rsl_rl import (
@@ -21,6 +21,7 @@ from agile.rl_env.rsl_rl import (
     RslRlOnPolicyRunnerCfg,
     RslRlPpoActorCriticCfg,
     RslRlPpoAlgorithmCfg,
+    RslRlStudentTrainedTeacherCfg,
     RslRlSymmetryCfg,
 )
 
@@ -64,3 +65,5 @@ class G1VelocityPpoRunnerCfg(RslRlOnPolicyRunnerCfg):
             data_augmentation_func=lr_mirror_G1,
         ),
     )
+
+

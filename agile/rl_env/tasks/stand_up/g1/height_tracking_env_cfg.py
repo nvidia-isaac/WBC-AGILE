@@ -16,6 +16,8 @@
 
 import math
 
+from isaaclab_physx.physics import PhysxCfg
+
 import isaaclab.sim as sim_utils
 from isaaclab.assets import AssetBaseCfg
 from isaaclab.envs import ManagerBasedRLEnvCfg
@@ -29,9 +31,9 @@ from isaaclab.managers import TerminationTermCfg as DoneTerm
 from isaaclab.scene import InteractiveSceneCfg
 from isaaclab.sensors import ContactSensorCfg, RayCasterCfg, patterns
 from isaaclab.terrains import TerrainImporterCfg
-from isaaclab.utils import configclass
 from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR, ISAACLAB_NUCLEUS_DIR
-from isaaclab.utils.noise import AdditiveUniformNoiseCfg as Unoise
+from isaaclab.utils.configclass import configclass
+from isaaclab.utils.noise import UniformNoiseCfg as Unoise
 
 from agile.rl_env import mdp
 from agile.rl_env.assets.robots import unitree_g1
@@ -752,7 +754,9 @@ class G1HeightTrackingEnvCfg(ManagerBasedRLEnvCfg):
         self.sim.physics_material = self.scene.terrain.physics_material
         self.scene.contact_forces.update_period = self.sim.dt
 
-        self.sim.physx.gpu_max_rigid_patch_count = 2**20
+        if self.sim.physics is None:
+            self.sim.physics = PhysxCfg()
+        self.sim.physics.gpu_max_rigid_patch_count = 2**20
 
         if self.scene.height_measurement_sensor is not None:
             self.scene.height_measurement_sensor.update_period = self.sim.dt

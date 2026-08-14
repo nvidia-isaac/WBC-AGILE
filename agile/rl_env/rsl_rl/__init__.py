@@ -20,11 +20,17 @@ The following example shows how to wrap an environment for RSL-RL:
 
 .. code-block:: python
 
-    from isaaclab_rl.rsl_rl import RslRlVecEnvWrapper
+    from agile.rl_env.rsl_rl import RslRlVecEnvWrapper
 
     env = RslRlVecEnvWrapper(env)
 
 """
+
+# ruff: noqa: E402
+
+from . import bootstrap as bootstrap
+
+bootstrap.ensure_rsl_rl_patch()
 
 from .exporter import export_policy_as_jit, export_policy_as_onnx
 from .l2c2_cfg import RslRlL2C2Cfg
@@ -33,8 +39,10 @@ from .rl_cfg import (
     RslRlOnPolicyRunnerCfg,
     RslRlPpoActorCriticCfg,
     RslRlPpoAlgorithmCfg,
+    rsl_rl_cfg_to_dict,
 )
 from .rnd_cfg import RslRlRndCfg
+from .runner import make_rsl_rl_inference_load_cfg, make_rsl_rl_load_cfg, make_rsl_rl_runner
 from .symmetry_cfg import RslRlSymmetryCfg
 from .teacher_stundent_distillation_cfg import (
     RslRlDistillationAlgorithmCfg,
@@ -48,6 +56,7 @@ __all__ = [
     "RslRlOnPolicyRunnerCfg",
     "RslRlPpoActorCriticCfg",
     "RslRlPpoAlgorithmCfg",
+    "rsl_rl_cfg_to_dict",
     "RslRlRewardNormalizationCfg",
     "RslRlRndCfg",
     "RslRlSymmetryCfg",
@@ -55,4 +64,7 @@ __all__ = [
     "RslRlDistillationAlgorithmCfg",
     "RslRlStudentTrainedTeacherCfg",
     "RslRlVecEnvWrapper",
+    "make_rsl_rl_inference_load_cfg",
+    "make_rsl_rl_load_cfg",
+    "make_rsl_rl_runner",
 ]

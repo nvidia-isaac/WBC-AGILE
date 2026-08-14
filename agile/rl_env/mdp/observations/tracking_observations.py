@@ -21,11 +21,10 @@ from isaaclab.managers import SceneEntityCfg
 from isaaclab.sensors import FrameTransformer
 from isaaclab.utils.math import matrix_from_quat, quat_apply_inverse, subtract_frame_transforms
 
-from agile.isaaclab_extras.utils.io_descriptors import generic_io_descriptor, record_dtype, record_shape
+from agile.rl_env.mdp.commands.height_command import SmoothHeightCommand
 from agile.rl_env.mdp.commands.tracking_commands import TrackingCommand
 
 
-@generic_io_descriptor(observation_type="MotionTracking", on_inspect=[record_shape, record_dtype], units="m")
 def motion_anchor_pos_b(env: ManagerBasedEnv, command_name: str) -> torch.Tensor:
     """Target anchor position relative to current anchor in body frame. Shape: (num_envs, 3).
 
@@ -45,7 +44,6 @@ def motion_anchor_pos_b(env: ManagerBasedEnv, command_name: str) -> torch.Tensor
     return pos.view(env.num_envs, -1)
 
 
-@generic_io_descriptor(observation_type="MotionTracking", on_inspect=[record_shape, record_dtype], units="unit")
 def motion_anchor_ori_b(env: ManagerBasedEnv, command_name: str) -> torch.Tensor:
     """Target anchor orientation relative to current anchor as flattened rotation matrix. Shape: (num_envs, 6).
 
@@ -65,14 +63,12 @@ def motion_anchor_ori_b(env: ManagerBasedEnv, command_name: str) -> torch.Tensor
     return mat[..., :2].reshape(mat.shape[0], -1)
 
 
-@generic_io_descriptor(observation_type="MotionTracking", on_inspect=[record_shape, record_dtype], units="rad")
 def motion_joint_pos_delta(env: ManagerBasedEnv, command_name: str) -> torch.Tensor:
     """Target joint positions minus current joint positions. Shape: (num_envs, num_tracked_joints)."""
     command: TrackingCommand = env.command_manager.get_term(command_name)
     return command.command_tracked_joint_pos - command.robot_tracked_joint_pos
 
 
-@generic_io_descriptor(observation_type="MotionTracking", on_inspect=[record_shape, record_dtype], units="m")
 def object_to_hand_pos_b(
     env: ManagerBasedEnv,
     command_name: str,
@@ -107,13 +103,12 @@ def object_to_hand_pos_b(
 
     # Transform to body frame using robot root orientation
     robot = env.scene["robot"]
-    root_quat_w = robot.data.root_quat_w  # (num_envs, 4)
+    root_quat_w = robot.data.root_quat_w.torch  # (num_envs, 4)
     object_to_hand_b = quat_apply_inverse(root_quat_w, object_to_hand_w)
 
     return object_to_hand_b
 
 
-@generic_io_descriptor(observation_type="MotionTracking", on_inspect=[record_shape, record_dtype], units="unit")
 def trajectory_progress(env: ManagerBasedEnv, command_name: str) -> torch.Tensor:
     """Observation of normalized trajectory progress.
 
@@ -142,7 +137,29 @@ def trajectory_progress(env: ManagerBasedEnv, command_name: str) -> torch.Tensor
     return progress.unsqueeze(-1)  # (num_envs, 1)
 
 
-@generic_io_descriptor(observation_type="MotionTracking", on_inspect=[record_shape, record_dtype], units="m")
+def height_settle_time_remaining(env: ManagerBasedEnv, command_name: str) -> torch.Tensor:
+    """Remaining settle time fraction before height tracking rewards activate.
+
+    Returns a value in [0, 1]:
+    - 1.0 = command just resampled, full settle period ahead
+    - 0.0 = settle period elapsed, tracking rewards active
+
+    This lets the policy plan smooth trajectories when it has time,
+    rather than reacting with jerky corrections to step-function commands.
+
+    Args:
+        env: The environment object.
+        command_name: Name of the height command term.
+
+    Returns:
+        Tensor of shape (num_envs, 1) with remaining settle fraction in [0, 1].
+    """
+    command: SmoothHeightCommand = env.command_manager.get_term(command_name)
+    settle_steps = max(command._settle_steps, 1)
+    remaining = 1.0 - command._steps_since_resample.float() / settle_steps
+    return torch.clamp(remaining, 0.0, 1.0).unsqueeze(-1)
+
+
 def object_pos_error(env: ManagerBasedEnv, command_name: str) -> torch.Tensor:
     """Observation of object position error (target - current).
 

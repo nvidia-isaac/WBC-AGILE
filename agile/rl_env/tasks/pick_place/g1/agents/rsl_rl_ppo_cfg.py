@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from isaaclab.utils import configclass
+from isaaclab.utils.configclass import configclass
 
 from agile.rl_env.rsl_rl import (  # noqa: F401
     RslRlOnPolicyRunnerCfg,
@@ -34,6 +34,7 @@ class G1PickPlacePPORunnerCfg(RslRlOnPolicyRunnerCfg):
     enable_entropy_coef_annealing = True
     # This is a heuristic value based on the training curves.
     entropy_coef_annealing_start_progress = 0.1
+    # FIXME: The current average episode length is 160 and our episode length is 500.
     enable_entropy_coef_annealing_success_rate = 0.3
     entropy_annealing_decay_rate = 0.9998
     policy = RslRlPpoActorCriticCfg(

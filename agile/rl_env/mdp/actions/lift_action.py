@@ -64,7 +64,7 @@ class LiftAction(ActionTerm):
 
         # Override force limit based on robot weight if configured
         if cfg.force_limit_weight_fraction is not None:
-            total_mass = self._asset.data.default_mass.sum(dim=1).mean().item()
+            total_mass = self._asset.data.default_mass.torch.sum(dim=1).mean().item()
             gravity = abs(env.cfg.sim.gravity[2]) if hasattr(env.cfg.sim, "gravity") else 9.81
             self._force_limit = cfg.force_limit_weight_fraction * total_mass * gravity
         # Store base force limit for curriculum scaling
@@ -142,7 +142,7 @@ class LiftAction(ActionTerm):
         if self._height_command is not None:
             return self._height_command.measured_height
         else:
-            height = self._asset.data.root_pos_w[:, 2].unsqueeze(1) - self._height_sensor.data.ray_hits_w[..., 2]
+            height = self._asset.data.root_pos_w.torch[:, 2].unsqueeze(1) - self._height_sensor.data.ray_hits_w[..., 2]
             return torch.mean(height, dim=-1)
 
     def apply_actions(self) -> None:
@@ -167,7 +167,7 @@ class LiftAction(ActionTerm):
             target_height = ratio * self.cfg.target_height
 
         # find the error in local frame of root
-        forces = torch.zeros_like(self._asset.data.root_lin_vel_b)
+        forces = torch.zeros_like(self._asset.data.root_lin_vel_b.torch)
         # calculate the height error
         height_error = target_height - height  # (N,)
         # apply the height error to the forces
@@ -185,16 +185,16 @@ class LiftAction(ActionTerm):
 
         # Angular velocity damping (D term) - only on z-axis (yaw) in world frame
         # This prevents fast spinning while allowing roll/pitch for balance
-        torques_w = torch.zeros_like(self._asset.data.root_ang_vel_w)
+        torques_w = torch.zeros_like(self._asset.data.root_ang_vel_w.torch)
         if self.damping_torques > 0:
             # Get angular velocity in world frame and damp only z-component
-            ang_vel_z = self._asset.data.root_ang_vel_w[:, 2]
+            ang_vel_z = self._asset.data.root_ang_vel_w.torch[:, 2]
             torques_w[:, 2] = -self.damping_torques * ang_vel_z
             # Clamp torques
             torques_w[:, 2] = torch.clamp(torques_w[:, 2], -self._torque_limit, self._torque_limit)
 
         # rotate forces and torques to body frame
-        link_quat = self._asset.data.body_quat_w[:, self._lift_link_id].squeeze(1)
+        link_quat = self._asset.data.body_quat_w.torch[:, self._lift_link_id].squeeze(1)
         forces_b = math_utils.quat_apply_inverse(link_quat, forces)
         torques_b = math_utils.quat_apply_inverse(link_quat, torques_w.unsqueeze(1))
 

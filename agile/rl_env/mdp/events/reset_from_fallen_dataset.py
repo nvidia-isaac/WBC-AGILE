@@ -163,7 +163,7 @@ class reset_from_fallen_dataset(ManagerTermBase):
         asset: RigidObject | Articulation,
     ) -> None:
         """Reset environments to standing pose with random yaw."""
-        root_states = asset.data.default_root_state[env_ids].clone()
+        root_states = asset.data.default_root_state.torch[env_ids].clone()
 
         # Random yaw only (no roll/pitch for standing)
         yaw = torch.rand(len(env_ids), device=env.device) * 2 * torch.pi - torch.pi
@@ -185,8 +185,8 @@ class reset_from_fallen_dataset(ManagerTermBase):
         # Reset joints to default
         if isinstance(asset, Articulation):
             asset.write_joint_state_to_sim(
-                asset.data.default_joint_pos[env_ids],
-                asset.data.default_joint_vel[env_ids],
+                asset.data.default_joint_pos.torch[env_ids],
+                asset.data.default_joint_vel.torch[env_ids],
                 env_ids=env_ids,
             )
 

@@ -15,3 +15,4 @@
 
 from .randomization_curriculum import *  # noqa: F401, F403
 from .task_curriculum import *  # noqa: F401, F403
+from .tracking_curriculum import *  # noqa: F401, F403

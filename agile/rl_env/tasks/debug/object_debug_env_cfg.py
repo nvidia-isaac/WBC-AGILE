@@ -26,7 +26,7 @@ create a new env config that inherits from it and replace the action terms in __
 
 .. code-block:: python
 
-    from isaaclab.utils import configclass
+    from isaaclab.utils.configclass import configclass
     # Note: ManipulationEnvCfg does not exist, this is just an example to show how to adapt an existing task config for GUI debugging.
     from agile.rl_env.tasks.manipulation.manipulation_env_cfg import ManipulationEnvCfg
     from agile.rl_env.mdp.actions.joint_pos_gui_action_cfg import JointPositionGUIActionCfg
@@ -87,8 +87,8 @@ import math
 import isaaclab.sim as sim_utils
 from isaaclab.assets import RigidObjectCfg
 from isaaclab.sim.schemas.schemas_cfg import RigidBodyPropertiesCfg
-from isaaclab.utils import configclass
 from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR
+from isaaclab.utils.configclass import configclass
 
 from agile.rl_env.assets.robots.unitree_g1 import G1_29DOF_DELAYED_DC_MOTOR
 from agile.rl_env.mdp.actions.object_pose_gui_action_cfg import ObjectPoseGUIActionCfg
@@ -124,7 +124,7 @@ class SceneCfg(SceneCfg):
         ),
         init_state=RigidObjectCfg.InitialStateCfg(
             pos=[0.5, 0.0, 0.8],
-            rot=[1.0, 0.0, 0.0, 0.0],
+            rot=[0.0, 0.0, 0.0, 1.0],  # identity (x, y, z, w)
         ),
     )
 

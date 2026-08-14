@@ -22,7 +22,7 @@ from . import agents
 #################################################
 
 gym.register(
-    id="G1-PickPlace-Tracking-v0",
+    id="PickPlace-G1-v0",
     entry_point="isaaclab.envs:ManagerBasedRLEnv",
     disable_env_checker=True,
     kwargs={
@@ -32,7 +32,7 @@ gym.register(
 )
 
 gym.register(
-    id="G1-PickPlace-Tracking-v0-Debug",
+    id="PickPlace-G1-Debug-v0",
     entry_point="isaaclab.envs:ManagerBasedRLEnv",
     disable_env_checker=True,
     kwargs={
@@ -42,7 +42,7 @@ gym.register(
 )
 
 gym.register(
-    id="G1-PickPlace-Tracking-v0-Record",
+    id="PickPlace-G1-Record-v0",
     entry_point="isaaclab.envs:ManagerBasedRLEnv",
     disable_env_checker=True,
     kwargs={
@@ -52,7 +52,7 @@ gym.register(
 )
 
 gym.register(
-    id="G1-PickPlace-Tracking-v0-GR00T-Inference",
+    id="PickPlace-G1-GR00T-Inference-v0",
     entry_point="isaaclab.envs:ManagerBasedRLEnv",
     disable_env_checker=True,
     kwargs={

@@ -1,7 +1,7 @@
 # Default evaluation configuration
 # Comprehensive capability test for policy evaluation
 evaluation:
-  task_name: "Velocity-Height-G1-Dev-v0"
+  task_name: "Velocity-Height-G1-History-v0"
   num_envs: 4
   episode_length_s: 100.0
   num_episodes: 1

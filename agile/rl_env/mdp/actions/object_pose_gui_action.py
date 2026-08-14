@@ -71,8 +71,8 @@ class ObjectPoseGUIAction(ActionTerm):
         self._object: RigidObject = env.scene[cfg.asset_name]
 
         # Initialize desired pose from current object state
-        current_pos = self._object.data.root_link_pos_w[0].clone()
-        current_quat = self._object.data.root_link_quat_w[0].clone()
+        current_pos = self._object.data.root_link_pos_w.torch[0].clone()
+        current_quat = self._object.data.root_link_quat_w.torch[0].clone()
 
         # Convert quaternion to Euler angles for GUI
         roll, pitch, yaw = euler_xyz_from_quat(current_quat.unsqueeze(0))
@@ -275,8 +275,8 @@ class ObjectPoseGUIAction(ActionTerm):
             while dpg.is_dearpygui_running():
                 # Update current pose display
                 try:
-                    current_pos = self._object.data.root_link_pos_w[0].cpu()
-                    current_quat = self._object.data.root_link_quat_w[0].cpu()
+                    current_pos = self._object.data.root_link_pos_w.torch[0].cpu()
+                    current_quat = self._object.data.root_link_quat_w.torch[0].cpu()
                     dpg.set_value(
                         pos_text_tag,
                         f"Pos: [{current_pos[0]:.3f}, {current_pos[1]:.3f}, {current_pos[2]:.3f}]",
@@ -298,8 +298,8 @@ class ObjectPoseGUIAction(ActionTerm):
                 try:
                     if not dpg.is_dearpygui_running():
                         break
-                    current_pos = self._object.data.root_link_pos_w[0].cpu()
-                    current_quat = self._object.data.root_link_quat_w[0].cpu()
+                    current_pos = self._object.data.root_link_pos_w.torch[0].cpu()
+                    current_quat = self._object.data.root_link_quat_w.torch[0].cpu()
                     dpg.set_value(
                         pos_text_tag,
                         f"Pos: [{current_pos[0]:.3f}, {current_pos[1]:.3f}, {current_pos[2]:.3f}]",
@@ -360,8 +360,8 @@ class ObjectPoseGUIAction(ActionTerm):
         # Sync GUI with current object pose on reset
         if env_ids is None or 0 in env_ids:
             with self._lock:
-                current_pos = self._object.data.root_link_pos_w[0].cpu()
-                current_quat = self._object.data.root_link_quat_w[0].cpu()
+                current_pos = self._object.data.root_link_pos_w.torch[0].cpu()
+                current_quat = self._object.data.root_link_quat_w.torch[0].cpu()
                 roll, pitch, yaw = euler_xyz_from_quat(current_quat.unsqueeze(0))
 
                 self._desired_pos[:] = current_pos

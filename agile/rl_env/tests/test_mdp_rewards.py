@@ -19,12 +19,23 @@ from unittest.mock import MagicMock, patch
 
 import torch
 
-from agile.rl_env.tests.utils import APP_IS_READY
+from isaaclab.managers import SceneEntityCfg
+from isaaclab.managers.manager_term_cfg import RewardTermCfg
 
-if APP_IS_READY:
-    from isaaclab.managers import SceneEntityCfg
+from agile.rl_env import mdp
 
-    from agile.rl_env import mdp
+
+class _CountingContactSensor:
+    def __init__(self, body_names: list[str], force_history: torch.Tensor):
+        self._body_names = body_names
+        self.body_names_reads = 0
+        self.data = MagicMock()
+        self.data.net_forces_w_history = force_history
+
+    @property
+    def body_names(self) -> list[str]:
+        self.body_names_reads += 1
+        return self._body_names
 
 
 class TestRewardsBase(unittest.TestCase):
@@ -47,7 +58,8 @@ class TestRewardsBase(unittest.TestCase):
         # Setup robot data
         self.robot.data = MagicMock()
         self.robot.data.root_pos_w = torch.tensor([[0.0, 0.0, 0.7], [0.0, 0.0, 0.8]], device=self.device)
-        self.robot.data.root_quat_w = torch.tensor([[1.0, 0.0, 0.0, 0.0], [1.0, 0.0, 0.0, 0.0]], device=self.device)
+        # Identity quaternion (x, y, z, w) per Isaac Lab 3.0 convention.
+        self.robot.data.root_quat_w = torch.tensor([[0.0, 0.0, 0.0, 1.0], [0.0, 0.0, 0.0, 1.0]], device=self.device)
         self.robot.data.root_lin_vel_w = torch.tensor([[0.0, 0.0, 0.0], [0.1, 0.2, 0.0]], device=self.device)
         self.robot.data.joint_pos = torch.zeros((self.num_envs, 10), device=self.device)
         self.robot.data.joint_vel = torch.zeros((self.num_envs, 10), device=self.device)
@@ -123,7 +135,46 @@ class TestRewardsBase(unittest.TestCase):
         self.sensor_cfg.name = "contact_sensor"
 
 
-@unittest.skipIf(not APP_IS_READY, "App is not ready")
+class TestImpactVelocity(TestRewardsBase):
+    def test_impact_velocity_caches_mapping_and_preserves_l1_l2_values(self):
+        self.sensor_cfg.body_ids = [0, 1]
+        sensor = _CountingContactSensor(
+            ["left_foot", "right_foot"],
+            torch.tensor(
+                [
+                    [[[0.0, 0.0, 12.0], [0.0, 0.0, 0.0]]],
+                    [[[0.0, 0.0, 12.0], [0.0, 0.0, 12.0]]],
+                ]
+            ),
+        )
+        self.env.scene.sensors["contact_sensor"] = sensor
+        self.robot.find_bodies.return_value = ([2, 0], ["left_foot", "right_foot"])
+        self.robot.data.body_lin_vel_w = torch.tensor(
+            [
+                [[0.0, 4.0, 0.0], [0.0, 0.0, 0.0], [3.0, 0.0, 0.0]],
+                [[0.0, 12.0, 0.0], [0.0, 0.0, 0.0], [3.0, 4.0, 0.0]],
+            ]
+        )
+        cfg = RewardTermCfg(func=mdp.impact_velocity, weight=-1.0, params={"sensor_cfg": self.sensor_cfg})
+
+        term = mdp.impact_velocity(cfg, self.env)
+
+        torch.testing.assert_close(term(self.env, self.sensor_cfg), torch.tensor([3.0, 17.0]))
+        torch.testing.assert_close(term(self.env, self.sensor_cfg, kernel="l2"), torch.tensor([9.0, 169.0]))
+        assert sensor.body_names_reads == 1
+        self.robot.find_bodies.assert_called_once_with(["left_foot", "right_foot"], preserve_order=True)
+
+    def test_impact_velocity_accepts_resolved_slice_body_ids(self):
+        self.sensor_cfg.body_ids = slice(None)
+        sensor = _CountingContactSensor(["left_foot", "right_foot"], torch.zeros(2, 1, 2, 3))
+        self.env.scene.sensors["contact_sensor"] = sensor
+        cfg = RewardTermCfg(func=mdp.impact_velocity, weight=-1.0, params={"sensor_cfg": self.sensor_cfg})
+
+        mdp.impact_velocity(cfg, self.env)
+
+        self.robot.find_bodies.assert_called_once_with(["left_foot", "right_foot"], preserve_order=True)
+
+
 class TestTrackBaseHeight(TestRewardsBase):
     """Test cases for the track_base_height reward function."""
 
@@ -177,7 +228,6 @@ class TestTrackBaseHeight(TestRewardsBase):
         torch.testing.assert_close(reward, expected_reward)
 
 
-@unittest.skipIf(not APP_IS_READY, "App is not ready")
 class TestFeetStumble(TestRewardsBase):
     """Test cases for the feet_stumble reward function."""
 
@@ -212,7 +262,6 @@ class TestFeetStumble(TestRewardsBase):
             torch.testing.assert_close(reward_high, expected_reward_high)
 
 
-@unittest.skipIf(not APP_IS_READY, "App is not ready")
 class TestStandStill(TestRewardsBase):
     """Test cases for the stand_still reward function."""
 
@@ -267,7 +316,6 @@ class TestStandStill(TestRewardsBase):
         torch.testing.assert_close(reward, expected_reward)
 
 
-@unittest.skipIf(not APP_IS_READY, "App is not ready")
 class TestContactForcesL2(TestRewardsBase):
     """Test cases for the contact_forces_l2 reward function."""
 

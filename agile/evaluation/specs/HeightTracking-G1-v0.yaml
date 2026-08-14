@@ -1,0 +1,2 @@
+video_only: true
+sim2mujoco_scenario: agile/evaluation/scenarios/sim2mujoco_height_tracking.yaml

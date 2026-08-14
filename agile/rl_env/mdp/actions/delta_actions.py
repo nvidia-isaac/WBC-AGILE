@@ -43,11 +43,12 @@ class DeltaJointPositionAction(JointAction):
         super().__init__(cfg, env)
 
         # store the previous targets
-        self._prev_targets = self._asset.data.joint_pos[:, self._joint_ids]
+        self._prev_targets = self._asset.data.joint_pos.torch[:, self._joint_ids]
 
+        # FIXME: hacky way to fix non-controlled joints to default positions
         self._steady_joint_ids, _ = self._asset.find_joints(self.cfg.steady_joint_names)
         self._asset.set_joint_position_target(
-            self._asset.data.default_joint_pos[..., self._steady_joint_ids],
+            self._asset.data.default_joint_pos.torch[..., self._steady_joint_ids],
             joint_ids=self._steady_joint_ids,
         )
 
@@ -71,7 +72,7 @@ class DeltaJointPositionAction(JointAction):
 
         # Step 1: Initialize with robot's default joint position limits
         # joint_pos_limits shape: (num_instances, num_joints, 2) where 2 is [lower, upper]
-        default_limits = self._asset.data.joint_pos_limits[0, self._joint_ids, :].clone()  # (num_joints, 2)
+        default_limits = self._asset.data.joint_pos_limits.torch[0, self._joint_ids, :].clone()  # (num_joints, 2)
         limits = default_limits.unsqueeze(0)  # (1, num_joints, 2)
 
         # Step 2: Override with clip limits if defined, clamped to respect default limits
@@ -118,7 +119,7 @@ class DeltaJointPositionAction(JointAction):
         self._prev_targets = self._processed_actions.clone()
 
     def reset(self, env_ids: Sequence[int] | None = None) -> None:
-        self._prev_targets[env_ids] = self._asset.data.joint_pos[env_ids][..., self._joint_ids].clone()
+        self._prev_targets[env_ids] = self._asset.data.joint_pos.torch[env_ids][..., self._joint_ids].clone()
         self._raw_actions[env_ids] = 0.0
 
     def apply_actions(self) -> None:
