@@ -170,6 +170,13 @@ class TestUvProject(unittest.TestCase):
         ):
             self.assertNotIn(legacy_entrypoint, build_and_test)
 
+    def test_github_precommit_uses_supported_python_version(self) -> None:
+        pyproject = _load_pyproject()
+        premerge = (_REPO_ROOT / ".github" / "workflows" / "premerge.yml").read_text()
+
+        self.assertEqual(pyproject["project"]["requires-python"], ">=3.12,<3.13")
+        self.assertIn('python-version: "3.12"', premerge)
+
     def test_e2e_test_files_are_marked(self) -> None:
         e2e_test_files = sorted((_REPO_ROOT / "tests").glob("*_e2e.py"))
         self.assertGreater(len(e2e_test_files), 0)
