@@ -1,0 +1,3 @@
+metric_suite: motion_tracking
+scenario: agile/algorithms/evaluation/configs/default_eval.yaml
+sim2mujoco_scenario: agile/evaluation/scenarios/sim2mujoco_velocity_sequence.yaml

@@ -14,16 +14,18 @@
 # limitations under the License.
 
 
-from isaaclab.utils import configclass
+from isaaclab.utils.configclass import configclass
 
 from agile.rl_env.mdp.symmetry import (
     lr_mirror_G1,
 )  # noqa: F401
 from agile.rl_env.rsl_rl import (  # noqa: F401
     RslRlDistillationAlgorithmCfg,
+    RslRlL2C2Cfg,
     RslRlOnPolicyRunnerCfg,
     RslRlPpoActorCriticCfg,
     RslRlPpoAlgorithmCfg,
+    RslRlRewardNormalizationCfg,
     RslRlStudentTrainedTeacherCfg,
     RslRlSymmetryCfg,
 )
@@ -40,9 +42,10 @@ class G1VelocityHeightPpoRunnerCfg(RslRlOnPolicyRunnerCfg):
     wandb_project = "Velocity-Height-G1-Lower"
     empirical_normalization = False
     enable_entropy_coef_annealing = True
-    entropy_coef_annealing_start_progress = 0.2
+    entropy_coef_annealing_start_progress = 0.3
     enable_entropy_coef_annealing_success_rate = 0.8
-    entropy_annealing_decay_rate = 0.9995
+    entropy_annealing_decay_rate = 0.9998
+    min_entropy_coef = 0.001
     policy = RslRlPpoActorCriticCfg(
         init_noise_std=1.0,
         actor_hidden_dims=[256, 256, 128],
@@ -74,7 +77,7 @@ class G1VelocityHeightPpoRunnerCfg(RslRlOnPolicyRunnerCfg):
 class G1VelocityHeightDistillationRecurrentRunnerCfg(G1VelocityHeightPpoRunnerCfg):
     seed = 42
     num_steps_per_env = 24
-    max_iterations = 10_000
+    max_iterations = 5_000
     save_interval = 100
     experiment_name = "velocity_height_g1_lower_distillation"
     run_name = "velocity_height_g1_lower_distillation"
@@ -87,7 +90,7 @@ class G1VelocityHeightDistillationRecurrentRunnerCfg(G1VelocityHeightPpoRunnerCf
     )
     policy = RslRlStudentTrainedTeacherCfg(
         class_name="StudentTrainedTeacherRecurrent",  # "StudentTrainedTeacher",
-        teacher_path="agile/data/policy/velocity_height_g1/unitree_g1_velocity_height_teacher.pt",
+        teacher_path="agile/data/policy/velocity_height_g1/unitree_g1_velocity_height_teacher_torchscript.pt",
         student_hidden_dims=[256, 256, 128],
         activation="elu",
     )
@@ -97,7 +100,7 @@ class G1VelocityHeightDistillationRecurrentRunnerCfg(G1VelocityHeightPpoRunnerCf
 class G1VelocityHeightDistillationHistoryRunnerCfg(G1VelocityHeightPpoRunnerCfg):
     seed = 42
     num_steps_per_env = 24
-    max_iterations = 10_000
+    max_iterations = 5_000
     save_interval = 100
     experiment_name = "velocity_height_g1_lower_distillation"
     run_name = "velocity_height_g1_lower_distillation"
@@ -116,7 +119,59 @@ class G1VelocityHeightDistillationHistoryRunnerCfg(G1VelocityHeightPpoRunnerCfg)
     )
     policy = RslRlStudentTrainedTeacherCfg(
         class_name="StudentTrainedTeacher",  # "StudentTrainedTeacher",
-        teacher_path="agile/data/policy/velocity_height_g1/unitree_g1_velocity_height_teacher.pt",
+        teacher_path="agile/data/policy/velocity_height_g1/unitree_g1_velocity_height_teacher_torchscript.pt",
         student_hidden_dims=[512, 256, 128],
         activation="elu",
+    )
+
+
+@configclass
+class G1VelocityHeightHistoryPpoRunnerCfg(RslRlOnPolicyRunnerCfg):
+    """Direct history-based PPO training for velocity-height (no teacher/distillation)."""
+
+    seed = 42
+    num_steps_per_env = 24
+    max_iterations = 30_000
+    save_interval = 250
+    experiment_name = "velocity_height_g1_history"
+    run_name = "velocity_height_g1_history"
+    wandb_project = "Velocity-Height-G1-History"
+    empirical_normalization = False
+    enable_entropy_coef_annealing = True
+    entropy_coef_annealing_start_progress = 0.3
+    enable_entropy_coef_annealing_success_rate = 0.8
+    entropy_annealing_decay_rate = 0.9998
+    min_entropy_coef = 0.001
+    policy = RslRlPpoActorCriticCfg(
+        init_noise_std=1.0,
+        actor_hidden_dims=[512, 256, 128],
+        critic_hidden_dims=[512, 256, 128],
+        activation="elu",
+    )
+    algorithm = RslRlPpoAlgorithmCfg(
+        value_loss_coef=1.0,
+        use_clipped_value_loss=True,
+        clip_param=0.2,
+        entropy_coef=0.01,
+        num_learning_epochs=5,
+        num_mini_batches=4,
+        learning_rate=1.0e-3,
+        schedule="adaptive",
+        gamma=0.99,
+        lam=0.95,
+        desired_kl=0.01,
+        max_grad_norm=1.0,
+        reward_normalization_cfg=RslRlRewardNormalizationCfg(
+            decay=0.999,
+            epsilon=1e-2,
+        ),
+        l2c2_cfg=RslRlL2C2Cfg(
+            lambda_actor=1.0,
+            lambda_critic=0.1,
+        ),
+        symmetry_cfg=RslRlSymmetryCfg(
+            use_data_augmentation=True,
+            use_mirror_loss=False,
+            data_augmentation_func=lr_mirror_G1,
+        ),
     )

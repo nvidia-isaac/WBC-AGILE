@@ -13,10 +13,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+
 import os
 from dataclasses import MISSING
 
-from isaaclab.utils import configclass
+from isaaclab.utils.configclass import configclass
 
 from agile.rl_env.assets.robots.unitree_g1 import G1_29DOF_ACTION_SCALE, G1_29DOF_BeyondMimic
 from agile.rl_env.tasks.tracking.tracking_env_cfg import TrackingEnvCfg
@@ -31,6 +32,8 @@ class G1FlatEnvCfg(TrackingEnvCfg):
         self.actions.joint_pos.scale = G1_29DOF_ACTION_SCALE
         self.commands.motion.anchor_body_name = "torso_link"
         self.commands.motion.debug_vis = False
+        # The public task retains its original caller-supplied motion contract. Internally, keep a
+        # convenient default motion while still allowing callers to override it.
         self.commands.motion.motion_file = os.environ.get("MOTION_FILE", MISSING)
         self.commands.motion.body_names = [
             "pelvis",

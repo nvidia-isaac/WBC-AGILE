@@ -23,7 +23,7 @@ from . import agents
 ##
 
 gym.register(
-    id="Tracking-Flat-G1-v0",
+    id="MotionTracking-G1-v0",
     entry_point="isaaclab.envs:ManagerBasedRLEnv",
     disable_env_checker=True,
     kwargs={

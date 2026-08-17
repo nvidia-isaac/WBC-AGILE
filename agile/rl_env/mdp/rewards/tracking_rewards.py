@@ -13,6 +13,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+"""Reward functions for tracking humanoid end effector and root poses."""
+
+# ruff: noqa: I001
+
+from __future__ import annotations
 
 import torch
 

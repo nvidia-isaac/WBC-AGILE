@@ -28,6 +28,7 @@ from typing import Protocol, runtime_checkable
 import torch
 
 from agile.sim2mujoco.commands import CommandManager
+from agile.sim2mujoco.utils import matrix_from_quat, quat_apply_inverse, quat_inv, quat_mul
 
 
 @runtime_checkable
@@ -36,7 +37,7 @@ class CommandProvider(Protocol):
 
     @property
     def command_type(self) -> str:
-        """Short identifier: ``"velocity"``, ``"velocity_height"``, ``"motion_tracking"``."""
+        """Short identifier: ``"velocity"``, ``"velocity_height"``, ``"height"``, ``"motion_tracking"``."""
         ...
 
     @property
@@ -93,6 +94,32 @@ class VelocityCommandProvider:
         return self._manager
 
 
+class HeightCommandProvider:
+    """Scalar height-command provider for stand-up height tracking policies."""
+
+    def __init__(self, device: torch.device, default_height: float = 0.72):
+        self.device = device
+        self._height = float(default_height)
+
+    @property
+    def command_type(self) -> str:
+        return "height"
+
+    @property
+    def command_dim(self) -> int:
+        return 1
+
+    @property
+    def command_names(self) -> list[str]:
+        return ["height"]
+
+    def set_height(self, height: float) -> None:
+        self._height = float(height)
+
+    def get_commands(self) -> torch.Tensor:
+        return torch.tensor([self._height], device=self.device, dtype=torch.float32)
+
+
 class MotionCommandProvider:
     """Wraps :class:`~agile.sim2mujoco.observations.MotionTracker` as a command provider.
 
@@ -119,6 +146,32 @@ class MotionCommandProvider:
 
     def get_commands(self) -> torch.Tensor:
         return self._tracker.get_command()
+
+    def get_named_command(self, name: str, sim_state=None) -> torch.Tensor:
+        """Return a motion-tracking command or reference observation by exported input name."""
+        if name in {"motion", "generated_commands", "command", "reference_motion"}:
+            return self.get_commands()
+        if name == "motion_anchor_pos_b":
+            if sim_state is None or sim_state.anchor_body_pos is None:
+                return torch.zeros(3, device=self._tracker.device, dtype=torch.float32)
+            robot_pos = sim_state.anchor_body_pos.float()
+            robot_quat = sim_state.anchor_body_quat.float()
+            motion_pos = self._tracker.get_anchor_pos_w().float()
+            return quat_apply_inverse(robot_quat, motion_pos - robot_pos)
+        if name == "motion_anchor_ori_b":
+            if sim_state is None or sim_state.anchor_body_quat is None:
+                return torch.zeros(6, device=self._tracker.device, dtype=torch.float32)
+            robot_quat = sim_state.anchor_body_quat.float()
+            motion_quat = self._tracker.get_anchor_quat_w().float()
+            quat_rel = quat_mul(quat_inv(robot_quat), motion_quat)
+            return matrix_from_quat(quat_rel)[:, :2].reshape(-1)
+        raise ValueError(f"Unsupported motion command input: {name}")
+
+    def step(self) -> None:
+        self._tracker.step()
+
+    def reset(self) -> None:
+        self._tracker.reset()
 
 
 # ---------------------------------------------------------------------------

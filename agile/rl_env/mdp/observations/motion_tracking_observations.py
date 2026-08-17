@@ -20,7 +20,6 @@ from typing import TYPE_CHECKING
 
 import torch
 
-from isaaclab.envs.utils.io_descriptors import generic_io_descriptor, record_dtype, record_shape
 from isaaclab.utils.math import matrix_from_quat, subtract_frame_transforms
 
 from agile.rl_env.mdp.commands.motion_tracking_commands import MotionCommand
@@ -31,7 +30,6 @@ if TYPE_CHECKING:
 __all__ = ["robot_body_pos_b", "robot_body_ori_b"]
 
 
-@generic_io_descriptor(observation_type="MotionTracking", on_inspect=[record_shape, record_dtype])
 def robot_body_pos_b(env: ManagerBasedEnv, command_name: str) -> torch.Tensor:
     """Robot tracked body positions in anchor body frame."""
     command: MotionCommand = env.command_manager.get_term(command_name)
@@ -47,7 +45,6 @@ def robot_body_pos_b(env: ManagerBasedEnv, command_name: str) -> torch.Tensor:
     return pos_b.view(env.num_envs, -1)
 
 
-@generic_io_descriptor(observation_type="MotionTracking", on_inspect=[record_shape, record_dtype])
 def robot_body_ori_b(env: ManagerBasedEnv, command_name: str) -> torch.Tensor:
     """Robot tracked body orientations in anchor body frame (first 2 columns of rotation matrix)."""
     command: MotionCommand = env.command_manager.get_term(command_name)

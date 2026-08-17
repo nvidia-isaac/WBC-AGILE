@@ -6,6 +6,8 @@
 
 **[Paper](https://arxiv.org/abs/2603.20147)**
 
+AGILE targets Isaac Lab `v3.0.0-beta2`, Isaac Sim 6.0, Python 3.12, uv-based installation, and public RSL-RL `5.4.1` with a small AGILE patch.
+
 **[Documentation](https://nvidia-isaac.github.io/WBC-AGILE/)**
 
 <table align="center">
@@ -52,18 +54,14 @@
 
 ## Quick Start
 
-**Prerequisites:** [Isaac Lab v2.3.2](https://isaac-sim.github.io/IsaacLab/v2.3.2/source/setup/installation/index.html) with Isaac Sim 5.1.
+**Prerequisites:** Python 3.12, [uv](https://docs.astral.sh/uv/), and a Linux workstation with an NVIDIA GPU. The first `uv run` resolves AGILE's pinned Isaac Lab `3.0.0-beta2`, Isaac Sim 6.0, LEAPP, and RSL-RL dependencies.
 
 ```bash
-# Install AGILE
-export ISAACLAB_PATH=/path/to/IsaacLab
-./scripts/setup/install_deps_local.sh
-
 # Train a velocity tracking policy
-python scripts/train.py --task Velocity-T1-v0 --num_envs 2048 --headless
+uv run scripts/train.py --task Velocity-T1-v0 --num_envs 2048 --headless
 
 # Evaluate the trained policy
-python scripts/eval.py --task Velocity-T1-v0 --num_envs 32 --checkpoint <path>
+uv run scripts/eval.py --task Velocity-T1-v0 --num_envs 32 --checkpoint <path>
 ```
 
 See the [full documentation](https://nvidia-isaac.github.io/WBC-AGILE/) for installation details, training guides, task descriptions, and deployment instructions.
@@ -84,16 +82,16 @@ Please see [CONTRIBUTING.md](CONTRIBUTING.md) for detailed information on how to
 <details>
 <summary> License Information</summary>
 
-This repository contains code under two different open-source licenses:
-
-### BSD 3-Clause License
-The reinforcement learning algorithm library located in `agile/algorithms/rsl_rl/` is licensed under the **BSD 3-Clause License**.
-- **Copyright holders:** ETH Zurich, NVIDIA CORPORATION & AFFILIATES
-- This portion is based on the [RSL_RL](https://github.com/leggedrobotics/rsl_rl) library developed at ETH Zurich
+This repository contains code under two open-source licenses:
 
 ### Apache License 2.0
-All other portions of this repository are licensed under the **Apache License 2.0**.
+Most AGILE source code is licensed under the **Apache License 2.0**.
 - **Copyright holder:** NVIDIA CORPORATION & AFFILIATES
+
+### BSD 3-Clause License
+The RSL-RL compatibility patch in `third_party/rsl_rl/patches/` is based on
+[RSL_RL](https://github.com/leggedrobotics/rsl_rl), which is licensed under the
+**BSD 3-Clause License** by ETH Zurich and contributors.
 
 For complete license terms, see the [LICENCE](LICENCE) file.
 

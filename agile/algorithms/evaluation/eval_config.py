@@ -106,6 +106,55 @@ class SweepConfig:
 
 
 @dataclass
+class RampConfig:
+    """Configuration for linearly interpolated command generation."""
+
+    start_time: float
+    duration_s: float
+    interval_s: float
+    commands: dict | None = None
+    terrain: dict | None = None
+    events: dict | None = None
+
+    def to_schedule(self) -> list[ScheduleStep]:
+        """Convert ramp config to explicit schedule steps."""
+        if self.duration_s <= 0.0:
+            raise ValueError("ramp duration_s must be positive")
+        if self.interval_s <= 0.0:
+            raise ValueError("ramp interval_s must be positive")
+
+        count = int(round(self.duration_s / self.interval_s))
+        if count <= 0:
+            raise ValueError("ramp interval_s must produce at least one step")
+
+        schedule = []
+        for index in range(count + 1):
+            ratio = index / count
+            step_commands = self._interpolate_mapping(self.commands, ratio) if self.commands else None
+            schedule.append(
+                ScheduleStep(
+                    time=round(self.start_time + index * self.interval_s, 10),
+                    commands=step_commands,
+                    terrain=self.terrain,
+                    events=self.events,
+                )
+            )
+        return schedule
+
+    def _interpolate_mapping(self, mapping: dict, ratio: float) -> dict:
+        result = {}
+        for key, value in mapping.items():
+            if isinstance(value, dict):
+                result[key] = self._interpolate_mapping(value, ratio)
+            elif isinstance(value, list) and len(value) == 2:
+                start, end = float(value[0]), float(value[1])
+                result[key] = round(start + (end - start) * ratio, 10)
+            else:
+                result[key] = value
+        return result
+
+
+@dataclass
 class EnvConfig:
     """Configuration for a specific environment or group of environments."""
 
@@ -113,6 +162,7 @@ class EnvConfig:
     name: str
     schedule: list[ScheduleStep] = field(default_factory=list)
     sweep: SweepConfig | None = None
+    ramps: list[RampConfig] = field(default_factory=list)
 
     def get_full_schedule(self, max_time: float) -> list[ScheduleStep]:
         """Get complete schedule including expanded sweep.
@@ -129,6 +179,8 @@ class EnvConfig:
         if self.sweep:
             sweep_steps = self.sweep.to_schedule(max_time)
             full_schedule.extend(sweep_steps)
+        for ramp in self.ramps:
+            full_schedule.extend(ramp.to_schedule())
 
         # Sort by time
         full_schedule.sort(key=lambda s: s.time)
@@ -254,12 +306,27 @@ class EvalConfig:
                     events=sweep_data.get("events"),
                 )
 
+            # Parse ramp configs if present
+            ramps = []
+            for ramp_data in env_data.get("ramps", []):
+                ramps.append(
+                    RampConfig(
+                        start_time=ramp_data["start_time"],
+                        duration_s=ramp_data["duration_s"],
+                        interval_s=ramp_data["interval_s"],
+                        commands=ramp_data.get("commands"),
+                        terrain=ramp_data.get("terrain"),
+                        events=ramp_data.get("events"),
+                    )
+                )
+
             environments.append(
                 EnvConfig(
                     env_ids=env_data["env_ids"],
                     name=env_data["name"],
                     schedule=schedule,
                     sweep=sweep,
+                    ramps=ramps,
                 )
             )
 

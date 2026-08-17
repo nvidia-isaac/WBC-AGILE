@@ -13,6 +13,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# ruff: noqa: I001
+
 from . import debug, locomotion, locomotion_height, pick_place, stand_up, tracking
 
 __all__ = [

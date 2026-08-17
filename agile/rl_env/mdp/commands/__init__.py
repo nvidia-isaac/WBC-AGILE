@@ -40,11 +40,11 @@ __all__ = [
     "UniformVelocityBaseHeightCommandCfg",
     "UniformVelocityGaitBaseHeightCommand",
     "UniformVelocityGaitBaseHeightCommandCfg",
-    "SmoothHeightCommand",
-    "SmoothHeightCommandCfg",
     "TrackingCommand",
     "TrackingCommandCfg",
     "MotionCommand",
     "MotionCommandCfg",
+    "SmoothHeightCommand",
+    "SmoothHeightCommandCfg",
     "MotionData",
 ]

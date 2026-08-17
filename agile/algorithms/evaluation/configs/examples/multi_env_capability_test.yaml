@@ -2,7 +2,7 @@
 # Each environment tests a different capability simultaneously
 # This allows parallel testing of multiple aspects
 evaluation:
-  task_name: "Velocity-Height-G1-Dev-v0"
+  task_name: "Velocity-Height-G1-History-v0"
   num_envs: 4
   episode_length_s: 25.0
   num_episodes: 1

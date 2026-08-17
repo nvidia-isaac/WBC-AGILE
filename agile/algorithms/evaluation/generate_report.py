@@ -21,7 +21,7 @@ This script is standalone and works without Isaac Sim.
 Usage:
     # Generate report for all episodes
     python agile/algorithms/evaluation/generate_report.py \
-        --log_dir logs/evaluation/Velocity-Height-G1-Dev-v0_20251010_214925
+        --log_dir logs/evaluation/Velocity-Height-G1-History-v0_20251010_214925
 
     # Generate for specific episodes
     python agile/algorithms/evaluation/generate_report.py \
@@ -91,6 +91,24 @@ def main():
         default=None,
         help="Custom output directory for reports (default: log_dir/reports)",
     )
+    parser.add_argument(
+        "--eval_video",
+        type=Path,
+        default=None,
+        help="mp4 of the Isaac Lab eval rollout to embed.",
+    )
+    parser.add_argument(
+        "--sim2sim_video",
+        type=Path,
+        default=None,
+        help="mp4 of the Sim2MuJoCo rollout to embed.",
+    )
+    parser.add_argument(
+        "--task-name",
+        type=str,
+        default=None,
+        help="Task name to use in report titles when metadata.json is absent.",
+    )
 
     args = parser.parse_args()
 
@@ -105,6 +123,7 @@ def main():
         trajectory_dir=args.log_dir,
         output_dir=args.output_dir,
         plot_backend="plotly",
+        task_name=args.task_name,
     )
 
     # Generate report
@@ -113,6 +132,8 @@ def main():
         episode_ids=episode_ids,
         include_all_joints=True,
         open_browser=not args.no_browser,
+        eval_video=args.eval_video,
+        sim2sim_video=args.sim2sim_video,
     )
 
     print("\n✓ Done! Report available at:")

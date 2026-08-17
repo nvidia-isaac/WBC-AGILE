@@ -157,9 +157,9 @@ from isaaclab_tasks.utils import get_checkpoint_path, parse_env_cfg
 
 import agile.rl_env.tasks  # noqa: F401
 import agile.isaaclab_extras.monkey_patches
-from rsl_rl.runners import OnPolicyRunner
-from agile.rl_env.rsl_rl import RslRlOnPolicyRunnerCfg, RslRlVecEnvWrapper
-from agile.rl_env.rsl_rl import export_policy_as_jit, export_policy_as_onnx
+from agile.isaaclab_extras.record_video import EfficientRecordVideo
+from agile.rl_env.rsl_rl import RslRlOnPolicyRunnerCfg, RslRlVecEnvWrapper, make_rsl_rl_runner
+from agile.rl_env.rsl_rl_observations import policy_observation
 from data_recording.data_recorder import MultiEnvDataRecorder
 
 # Image dimensions for GR00T inference (from TiledCameraCfg)
@@ -259,12 +259,7 @@ def load_policy(resume_path, env, agent_cfg):
     # Load as regular checkpoint through OnPolicyRunner
     try:
         print(f"[INFO] Loading model checkpoint from: {resume_path}")
-        ppo_runner = OnPolicyRunner(
-            env,
-            agent_cfg.to_dict(),
-            log_dir=None,
-            device=agent_cfg.device,
-        )
+        ppo_runner = make_rsl_rl_runner(env, agent_cfg, log_dir=None, device=agent_cfg.device)
         ppo_runner.load(resume_path)
 
         # Obtain the trained policy for inference
@@ -330,7 +325,7 @@ def main():
         }
         print("[INFO] Recording videos.")
         print_dict(video_kwargs, nesting=4)
-        env = gym.wrappers.RecordVideo(env, **video_kwargs)
+        env = EfficientRecordVideo(env, app_launcher=app_launcher, **video_kwargs)
 
     # wrap around environment for rsl-rl
     env = RslRlVecEnvWrapper(env)
@@ -357,18 +352,8 @@ def main():
     if ppo_runner is not None:
         try:
             export_model_dir = os.path.join(os.path.dirname(resume_path), "exported")
-            export_policy_as_jit(
-                ppo_runner.alg.policy,
-                ppo_runner.obs_normalizer,
-                path=export_model_dir,
-                filename="policy.pt",
-            )
-            export_policy_as_onnx(
-                ppo_runner.alg.policy,
-                normalizer=ppo_runner.obs_normalizer,
-                path=export_model_dir,
-                filename="policy.onnx",
-            )
+            ppo_runner.export_policy_to_jit(path=export_model_dir, filename="policy.pt")
+            ppo_runner.export_policy_to_onnx(path=export_model_dir, filename="policy.onnx")
             print("[INFO] Successfully exported policy to JIT and ONNX")
         except Exception as e:
             print(f"[WARNING] Failed to export policy (continuing anyway): {e}")
@@ -398,7 +383,7 @@ def main():
 
     env.reset()
     print("[INFO] Running recording...")
-    obs, _ = env.get_observations()
+    obs = env.get_observations()
     timestep = 0
     num_steps = 0
 
@@ -425,7 +410,7 @@ def main():
                 # Get new action chunk if needed
                 if gr00t_action_chunk is None or gr00t_chunk_step >= args_cli.gr00t_action_horizon:
                     # Get full observations including the record group
-                    _, obs_extras = env.get_observations()
+                    _, obs_extras = env.get_observations_with_extras()
                     if "observations" in obs_extras:
                         gr00t_action_chunk = gr00t_policy_process(
                             obs_extras["observations"],
@@ -452,8 +437,7 @@ def main():
                 # RL policy inference
                 # Convert TensorDict to tensor if needed (for exported TorchScript policies)
                 if is_tensordict_obs and ppo_runner is None:
-                    # Flatten TensorDict to tensor for exported policy
-                    obs_tensor = torch.cat([v.flatten(start_dim=1) for v in obs.values()], dim=-1)
+                    obs_tensor = policy_observation(obs)
                 else:
                     obs_tensor = obs
 
@@ -467,7 +451,7 @@ def main():
             record_obs = None
             action_manager = env.unwrapped.action_manager
             if recorder is not None:
-                _, record_extras = env.get_observations()
+                _, record_extras = env.get_observations_with_extras()
                 if "observations" in record_extras:
                     record_obs = record_extras["observations"]
 

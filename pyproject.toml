@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools", "toml"]
+requires = ["setuptools"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -7,7 +7,7 @@ name = "agile"
 version = "0.1.0"
 description = "Adaptive, model-guided policy for whole-body loco-manipulation"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.12,<3.13"
 authors = [
     {name = "NVIDIA Corporation", email = "example@nvidia.com"}
 ]
@@ -15,34 +15,45 @@ classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Science/Research",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.12",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
-# Dependencies are managed in requirements/ directory
-# This list is for pip install agile[all] compatibility
 dependencies = [
+    # Isaac Lab / Isaac Sim stack
+    "isaaclab[isaacsim]==3.0.0b2",
+    # Match Isaac Lab 3.0.0-beta2's tested CUDA 12.8 dependency stack.
+    "torch==2.11.0",
+    "torchaudio==2.11.0",
+    "torchvision==0.26.0",
     # Core dependencies (requirements-core.txt)
-    "tensordict==0.8.3",
-    "wandb==0.22.2",
-    "protobuf==3.20.3",
+    "tensordict>=0.8.3",
+    "wandb>=0.22.2",
+    "protobuf>=3.20.3",
     "tqdm>=4.64.0",
     "numpy>=1.23.0",
     "scipy>=1.9.0",
     "pyyaml>=6.0",
     "gym>=0.21.0",
+    "pytest>=9.1.1",
     # Visualization dependencies (requirements-viz.txt)
-    "matplotlib==3.6.0",
-    "seaborn==0.13.2",
-    "plotly==5.0.0",
-    "pandas==2.3.1",
-    "beautifulsoup4==4.14.2",
+    "matplotlib>=3.6.0",
+    "seaborn>=0.13.2",
+    "plotly>=5.0.0",
+    "pandas>=2.3.1",
+    "beautifulsoup4>=4.14.2",
     "jinja2>=3.1.0",
     # Extra dependencies (requirements-extras.txt)
-    "datasets==2.19.0",
-    "dearpygui==2.1.0",
+    "datasets>=2.19.0",
+    "dearpygui>=2.1.0",
     # Sim2Mujoco dependencies
     "mujoco>=3.3.6",
+    "leapp==0.5.2",
+    # RL backend
+    "rsl-rl-lib==5.4.1",
 ]
+
+[project.scripts]
+agile-download-assets = "agile.evaluation.external_assets:main"
 
 [project.optional-dependencies]
 dev = [
@@ -52,13 +63,36 @@ dev = [
     "types-setuptools",
 ]
 
-[dependency-groups]
-docs = [
-    "sphinx>=8.0",
-    "nvidia-sphinx-theme",
-    "myst-parser",
-    "sphinx-design",
+[tool.uv]
+index-strategy = "unsafe-best-match"
+prerelease = "allow"
+override-dependencies = ["numpy>=2"]
+python-preference = "only-managed"
+environments = ["sys_platform == 'linux' and platform_machine == 'x86_64'"]
+
+[[tool.uv.index]]
+url = "https://pypi.nvidia.com"
+explicit = false
+
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true
+
+[tool.uv.sources]
+torch = [
+    { index = "pytorch-cu128", marker = "sys_platform == 'linux' and platform_machine == 'x86_64'" },
 ]
+torchaudio = [
+    { index = "pytorch-cu128", marker = "sys_platform == 'linux' and platform_machine == 'x86_64'" },
+]
+torchvision = [
+    { index = "pytorch-cu128", marker = "sys_platform == 'linux' and platform_machine == 'x86_64'" },
+]
+
+[tool.uv.pip]
+index-strategy = "unsafe-best-match"
+prerelease = "allow"
 
 [tool.setuptools.packages.find]
 where = ["."]
@@ -67,12 +101,11 @@ namespaces = true
 
 [tool.ruff]
 line-length = 120
-target-version = "py310"
+target-version = "py312"
 exclude = [
     "docs/*",
     "logs/*",
     "third_party/*",
-    "agile/algorithms/rsl_rl/*"
 ]
 
 [tool.ruff.lint]
@@ -127,6 +160,18 @@ indent-style = "space"
 skip-magic-trailing-comma = false
 line-ending = "auto"
 
+[tool.pytest.ini_options]
+markers = [
+    "e2e: end-to-end tests that launch full training, evaluation, or simulator workflows",
+]
+testpaths = [
+    "tests",
+    "agile/rl_env/tests",
+    "agile/algorithms/evaluation/tests",
+    "agile/evaluation/tests",
+    "agile/sim2mujoco/tests",
+]
+
 # Pylint config - uncomment if you re-enable pylint in pre-commit
 # [tool.pylint.messages_control]
 # disable = [
@@ -140,7 +185,7 @@ line-ending = "auto"
 # MyPy config - currently disabled due to 429 type errors
 # Gradually re-enable by fixing types in specific modules
 [tool.mypy]
-python_version = "3.10"
+python_version = "3.12"
 warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = true  # Too strict for current codebase
@@ -156,3 +201,11 @@ module = [
     "agile.rl_env.mdp.actions.actions_cfg"
 ]
 disable_error_code = ["assignment"]
+
+[dependency-groups]
+docs = [
+    "sphinx>=8.0",
+    "nvidia-sphinx-theme",
+    "myst-parser",
+    "sphinx-design",
+]

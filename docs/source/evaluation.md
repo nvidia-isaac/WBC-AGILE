@@ -25,14 +25,14 @@ The two paths differ in simulator backend and feature set:
 
 ```bash
 # Evaluate a trained policy
-python scripts/eval.py \
+uv run scripts/eval.py \
     --task Velocity-T1-v0 \
     --num_envs 32 \
     --checkpoint /path/to/model.pt \
     --run_evaluation
 
 # With trajectory saving and HTML report
-python scripts/eval.py \
+uv run scripts/eval.py \
     --task Velocity-T1-v0 \
     --num_envs 32 \
     --checkpoint /path/to/model.pt \
@@ -41,8 +41,8 @@ python scripts/eval.py \
     --generate_report
 
 # With a deterministic evaluation scenario
-python scripts/eval.py \
-    --task Velocity-Height-G1-v0 \
+uv run scripts/eval.py \
+    --task Velocity-Height-G1-History-v0 \
     --num_envs 16 \
     --checkpoint /path/to/model.pt \
     --run_evaluation \
@@ -77,29 +77,27 @@ logs/rsl_rl/<experiment_name>/
 
 ## Sim2MuJoCo Evaluation
 
-The Sim2MuJoCo path runs policies in MuJoCo for cross-simulator validation. See
-{doc}`sim2mujoco` for setup instructions (policy export, MJCF acquisition).
+The Sim2MuJoCo path runs LEAPP-exported policies in MuJoCo for cross-simulator
+validation. See {doc}`sim2mujoco` for setup instructions (LEAPP export, MJCF
+acquisition).
 
 ```bash
 # Interactive keyboard control
-python scripts/sim2mujoco_eval.py \
-    --checkpoint /path/to/policy.pt \
-    --config /path/to/config.yaml \
+uv run scripts/sim2mujoco_eval.py \
+    --leapp-yaml /path/to/leapp_bundle/policy.yaml \
     --mjcf /path/to/scene.xml \
     --duration 30.0
 
 # Deterministic evaluation (same YAML config format as Isaac Lab)
-python scripts/sim2mujoco_eval.py \
-    --checkpoint /path/to/policy.pt \
-    --config /path/to/config.yaml \
+uv run scripts/sim2mujoco_eval.py \
+    --leapp-yaml /path/to/leapp_bundle/policy.yaml \
     --mjcf /path/to/scene.xml \
     --eval-config agile/sim2mujoco/configs/x_velocity_sweep.yaml \
     --save-data --no-viewer
 
 # Random commands (reproducible with seed)
-python scripts/sim2mujoco_eval.py \
-    --checkpoint /path/to/policy.pt \
-    --config /path/to/config.yaml \
+uv run scripts/sim2mujoco_eval.py \
+    --leapp-yaml /path/to/leapp_bundle/policy.yaml \
     --mjcf /path/to/scene.xml \
     --random-commands all --random-interval 2.0 --random-seed 42 \
     --duration 50.0 --save-data --no-viewer
@@ -109,9 +107,8 @@ python scripts/sim2mujoco_eval.py \
 
 | Option | Description |
 |--------|-------------|
-| `--checkpoint` | Path to policy checkpoint (`.pt` or `.onnx`) |
-| `--config` | Path to exported I/O descriptor YAML |
-| `--mjcf` | Path to MuJoCo MJCF file (overrides config default) |
+| `--leapp-yaml` | Path to the LEAPP YAML exported by `scripts/export_policy_leapp.py` |
+| `--mjcf` | Path to the MuJoCo MJCF file (required; joint names and physics timestep are read from it) |
 | `--duration` | Simulation duration in seconds |
 | `--eval-config` | Path to YAML eval config (deterministic command schedule) |
 | `--save-data` | Save trajectory data to Parquet files |
@@ -119,7 +116,6 @@ python scripts/sim2mujoco_eval.py \
 | `--random-commands` | Randomize commands: field names (`vx`, `vy`, `wz`, `height`) or `all` |
 | `--random-interval` | Seconds between random resamples (default: 2.0) |
 | `--random-seed` | RNG seed for reproducible random commands |
-| `--noise-scale` | Observation noise scale (0=off, 1=match training, >1=stress test) |
 | `--pd-scale` | Scale factor for PD gains (use 0.3--0.5 for stability) |
 | `--no-viewer` | Disable MuJoCo viewer (headless mode) |
 | `--no-real-time` | Disable real-time pacing (runs as fast as possible) |
@@ -173,7 +169,7 @@ Uniform time intervals cycling through a list of values:
 
 ```yaml
 evaluation:
-  task_name: "Velocity-Height-G1-Dev-v0"
+  task_name: "Velocity-Height-G1-History-v0"
   num_envs: 4
   episode_length_s: 50.0
   num_episodes: 1
@@ -266,26 +262,26 @@ Start with `num_envs: 1` to validate configs. Use longer episodes than training 
 Interactive HTML reports with tracking analysis and per-joint plots. Reports are generated
 by the Isaac Lab evaluation path. The Sim2MuJoCo path does not generate reports directly,
 but its Parquet output is compatible with the plotting API for custom analysis (see
-Analyzing Trajectories below).
+[Analyzing Trajectories](#analyzing-trajectories-python-jupyter) below).
 
 ### Generation
 
 ```bash
 # Automatic (during evaluation)
-python scripts/eval.py --task <task_name> --checkpoint path/to/model.pt \
+uv run scripts/eval.py --task <task_name> --checkpoint path/to/model.pt \
     --run_evaluation --save_trajectories --generate_report
 
 # Manual (after evaluation)
-python agile/algorithms/evaluation/generate_report.py \
+uv run agile/algorithms/evaluation/generate_report.py \
     --log_dir logs/evaluation/task_datetime
 
 # Specific or failed episodes only
-python agile/algorithms/evaluation/generate_report.py \
+uv run agile/algorithms/evaluation/generate_report.py \
     --log_dir logs/evaluation/task_datetime \
     --episodes failed
 
 # Specific episode IDs
-python agile/algorithms/evaluation/generate_report.py \
+uv run agile/algorithms/evaluation/generate_report.py \
     --log_dir logs/evaluation/task_datetime \
     --episodes 0,3,5
 ```

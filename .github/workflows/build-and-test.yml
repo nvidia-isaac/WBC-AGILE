@@ -1,0 +1,71 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+name: WBC-AGILE Build & Test
+on:
+  workflow_dispatch:
+jobs:
+  build_and_test:
+    name: Build & Test
+    runs-on: [self-hosted, gpu]
+    timeout-minutes: 180
+    env:
+      DOCKER_IMAGE: agile-ci-${{ github.run_id }}
+      NGC_API_KEY: ${{ secrets.NGC_API_KEY }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          lfs: true
+      - name: NGC Login
+        run: |
+          if [ -n "$NGC_API_KEY" ]; then
+            echo "Logging into NGC registry..."
+            docker login -u \$oauthtoken -p $NGC_API_KEY nvcr.io
+            echo "Successfully logged into NGC registry"
+          else
+            echo "NGC_API_KEY not available - skipping NGC login"
+          fi
+      - name: Build Docker image
+        run: |
+          echo "::group::Build Docker image"
+          time docker build -f workflows/Dockerfile -t $DOCKER_IMAGE .
+          echo "::endgroup::"
+      - name: Run unit tests
+        run: |
+          echo "::group::Unit Tests"
+          docker run --name agile-unit-tests-${{ github.run_id }} \
+            --entrypoint bash --gpus all --network=host \
+            -e ACCEPT_EULA=Y \
+            -e OMNI_KIT_ACCEPT_EULA=yes \
+            -e OMNI_KIT_DISABLE_CUP=1 \
+            -e ISAAC_SIM_HEADLESS=1 \
+            -e ISAAC_SIM_LOW_MEMORY=1 \
+            -e WANDB_MODE=disabled \
+            -e CI=true \
+            -e PYTHONUNBUFFERED=1 \
+            $DOCKER_IMAGE \
+            -c 'uv run --frozen pytest -m "not e2e"'
+          echo "::endgroup::"
+      - name: Run E2E tests
+        run: |
+          echo "::group::E2E Tests"
+          docker run --name agile-e2e-tests-${{ github.run_id }} \
+            --entrypoint bash --gpus all --network=host \
+            -e ACCEPT_EULA=Y \
+            -e OMNI_KIT_ACCEPT_EULA=yes \
+            -e OMNI_KIT_DISABLE_CUP=1 \
+            -e ISAAC_SIM_HEADLESS=1 \
+            -e ISAAC_SIM_LOW_MEMORY=1 \
+            -e WANDB_MODE=disabled \
+            -e CI=true \
+            -e PYTHONUNBUFFERED=1 \
+            $DOCKER_IMAGE \
+            -c "uv run --frozen pytest -m e2e"
+          echo "::endgroup::"
+      - name: Cleanup
+        if: always()
+        run: |
+          docker rm agile-unit-tests-${{ github.run_id }} 2>/dev/null || true
+          docker rm agile-e2e-tests-${{ github.run_id }} 2>/dev/null || true
+          docker rmi $DOCKER_IMAGE 2>/dev/null || true

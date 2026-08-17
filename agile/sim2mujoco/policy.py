@@ -21,6 +21,7 @@ Supports three checkpoint formats:
   - Training checkpoints (.pt saved by RSL-RL OnPolicyRunner)
 """
 
+from collections import OrderedDict
 from pathlib import Path
 from typing import Any
 
@@ -63,52 +64,41 @@ def _infer_architecture(model_state: dict[str, torch.Tensor]) -> dict:
         num_actions, noise_std_type,
         is_recurrent, rnn_type, rnn_input_dim, rnn_hidden_dim, rnn_num_layers
     """
-    # Detect actor prefix: "actor.layers.*" or "student.layers.*"
-    if any(k.startswith("actor.layers.") for k in model_state):
-        actor_prefix = "actor.layers."
-    elif any(k.startswith("student.layers.") for k in model_state):
-        actor_prefix = "student.layers."
-    else:
-        raise ValueError(
-            "Cannot find actor weights in checkpoint. "
-            f"Expected keys starting with 'actor.layers.' or 'student.layers.', got: {list(model_state)[:10]}"
-        )
-
     # Collect linear layer weights in order.
     weight_keys = sorted(
-        [k for k in model_state if k.startswith(actor_prefix) and k.endswith(".weight")],
-        key=lambda k: int(k.replace(actor_prefix, "").split(".")[0]),
+        [k for k in model_state if k.startswith("mlp.") and k.endswith(".weight")],
+        key=lambda k: int(k.replace("mlp.", "").split(".")[0]),
     )
     if not weight_keys:
-        raise ValueError(f"No actor weight keys found with prefix '{actor_prefix}'")
+        raise ValueError(f"No policy MLP weight keys found in checkpoint. Keys found: {list(model_state)[:10]}")
 
     actor_input_dim = model_state[weight_keys[0]].shape[1]
     actor_hidden_dims = [model_state[k].shape[0] for k in weight_keys[:-1]]
     actor_output_dim = model_state[weight_keys[-1]].shape[0]
 
     # Detect noise_std_type.
-    if "std" in model_state:
+    if "distribution.std_param" in model_state:
         noise_std_type = "scalar"
-        num_actions = model_state["std"].shape[0]
-    elif "log_std" in model_state:
+        num_actions = model_state["distribution.std_param"].shape[0]
+    elif "distribution.log_std_param" in model_state:
         noise_std_type = "log"
-        num_actions = model_state["log_std"].shape[0]
+        num_actions = model_state["distribution.log_std_param"].shape[0]
     else:
         noise_std_type = "pred"
         num_actions = actor_output_dim // 2
 
     # Detect RNN.
-    is_recurrent = any(k.startswith("memory_a.rnn.") for k in model_state)
+    is_recurrent = any(k.startswith("rnn.rnn.") for k in model_state)
     rnn_type = None
     rnn_input_dim = 0
     rnn_hidden_dim = 0
     rnn_num_layers = 0
 
     if is_recurrent:
-        wih = model_state.get("memory_a.rnn.weight_ih_l0")
-        whh = model_state.get("memory_a.rnn.weight_hh_l0")
+        wih = model_state.get("rnn.rnn.weight_ih_l0")
+        whh = model_state.get("rnn.rnn.weight_hh_l0")
         if wih is None or whh is None:
-            raise ValueError("Recurrent policy detected but missing memory_a.rnn weights")
+            raise ValueError("Recurrent policy detected but missing rnn.rnn weights")
 
         rnn_input_dim = wih.shape[1]
         rnn_hidden_dim = whh.shape[1]
@@ -121,11 +111,11 @@ def _infer_architecture(model_state: dict[str, torch.Tensor]) -> dict:
         else:
             raise ValueError(f"Cannot determine RNN type from gate size {gate_size}")
 
-        while f"memory_a.rnn.weight_ih_l{rnn_num_layers}" in model_state:
+        while f"rnn.rnn.weight_ih_l{rnn_num_layers}" in model_state:
             rnn_num_layers += 1
 
     return {
-        "actor_prefix": actor_prefix,
+        "weight_keys": weight_keys,
         "actor_input_dim": actor_input_dim,
         "actor_hidden_dims": actor_hidden_dims,
         "actor_output_dim": actor_output_dim,
@@ -145,21 +135,26 @@ class _CheckpointInferenceModel(nn.Module):
     Replicates the forward pass of the JIT exporter: normalizer -> (rnn) -> actor.
     """
 
-    def __init__(self, arch: dict, activation: nn.Module):
+    def __init__(self, arch: dict, activation: str):
         super().__init__()
         self.noise_std_type = arch["noise_std_type"]
         self.num_actions = arch["num_actions"]
         self.is_recurrent = arch["is_recurrent"]
 
         # Build actor MLP.
-        layers: list[nn.Module] = []
+        layers = OrderedDict()
         in_dim = arch["actor_input_dim"]
-        for h_dim in arch["actor_hidden_dims"]:
-            layers.append(nn.Linear(in_dim, h_dim))
-            layers.append(activation)
-            in_dim = h_dim
-        layers.append(nn.Linear(in_dim, arch["actor_output_dim"]))
-        self.actor = nn.Sequential(*layers)
+        for layer_index, weight_key in enumerate(arch["weight_keys"]):
+            module_name = weight_key.replace("mlp.", "").split(".")[0]
+            if layer_index == len(arch["weight_keys"]) - 1:
+                out_dim = arch["actor_output_dim"]
+            else:
+                out_dim = arch["actor_hidden_dims"][layer_index]
+            layers[module_name] = nn.Linear(in_dim, out_dim)
+            in_dim = out_dim
+            if layer_index != len(arch["weight_keys"]) - 1:
+                layers[f"{module_name}_activation"] = _resolve_activation(activation)
+        self.actor = nn.Sequential(layers)
 
         # Normalizer (replaced after construction if checkpoint has one).
         self.normalizer: nn.Module = nn.Identity()
@@ -317,46 +312,43 @@ class CheckpointPolicyWrapper(PolicyWrapper):
 
         Args:
             checkpoint_path: Path to .pt checkpoint saved by RSL-RL.
-            config: IO-descriptor YAML config (used for optional ``policy.activation``).
+            config: Policy YAML config (used for optional ``policy.activation``).
             device: Torch device.
         """
         checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
 
-        if "model_state_dict" not in checkpoint:
+        if "actor_state_dict" in checkpoint:
+            model_state = checkpoint["actor_state_dict"]
+        elif "student_state_dict" in checkpoint:
+            model_state = checkpoint["student_state_dict"]
+        else:
             raise ValueError(
-                f"File is not a valid training checkpoint (missing 'model_state_dict'). "
-                f"Keys found: {list(checkpoint.keys())}"
+                f"File is not a valid rsl_rl 5.x checkpoint. "
+                f"Expected 'actor_state_dict' or 'student_state_dict'. Keys found: {list(checkpoint.keys())}"
             )
-
-        model_state = checkpoint["model_state_dict"]
         arch = _infer_architecture(model_state)
 
         # Resolve activation (default: elu).
         policy_config = config.get("policy", {})
         act_name = policy_config.get("activation", "elu")
-        activation = _resolve_activation(act_name)
 
         # Build inference model.
-        model = _CheckpointInferenceModel(arch, activation)
+        model = _CheckpointInferenceModel(arch, act_name)
 
         # Load actor weights.
-        actor_prefix = arch["actor_prefix"]
-        actor_state = {k.replace(actor_prefix, ""): v for k, v in model_state.items() if k.startswith(actor_prefix)}
+        actor_state = {k.replace("mlp.", ""): v for k, v in model_state.items() if k.startswith("mlp.")}
         model.actor.load_state_dict(actor_state)
 
         # Load RNN weights.
         if arch["is_recurrent"]:
-            rnn_state = {
-                k.replace("memory_a.rnn.", ""): v for k, v in model_state.items() if k.startswith("memory_a.rnn.")
-            }
+            rnn_state = {k.replace("rnn.rnn.", ""): v for k, v in model_state.items() if k.startswith("rnn.rnn.")}
             model.rnn.load_state_dict(rnn_state)
 
         # Load normalizer.
-        if "obs_norm_state_dict" in checkpoint:
-            norm_state = checkpoint["obs_norm_state_dict"]
+        if "obs_normalizer._mean" in model_state:
             model.normalizer = _SimpleNormalizer(
-                mean=norm_state["_mean"],
-                std=norm_state["_std"],
+                mean=model_state["obs_normalizer._mean"],
+                std=model_state["obs_normalizer._std"],
                 eps=1e-2,
             )
 
@@ -366,7 +358,7 @@ class CheckpointPolicyWrapper(PolicyWrapper):
         # Diagnostic output.
         iteration = checkpoint.get("iter", "unknown")
         arch_type = f"{arch['rnn_type'].upper()}" if arch["is_recurrent"] else "MLP"
-        has_norm = "obs_norm_state_dict" in checkpoint
+        has_norm = "obs_normalizer._mean" in model_state
         print(f"  Loaded training checkpoint (iteration {iteration})")
         print(f"  Architecture: {arch_type}, hidden dims: {arch['actor_hidden_dims']}")
         print(f"  Num actions: {arch['num_actions']} (noise_std_type: {arch['noise_std_type']})")

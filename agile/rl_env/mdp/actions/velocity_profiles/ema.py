@@ -54,6 +54,36 @@ class EMAVelocityProfile(VelocityProfileBase):
         # Estimated velocity (computed from position changes)
         self._current_velocity: torch.Tensor = torch.zeros_like(self._current_position)
 
+    def initialize_state(self, position: torch.Tensor, env_ids: torch.Tensor | None = None) -> None:
+        """Initialize profile state from the current joint position without sampling."""
+        if env_ids is None:
+            env_ids = torch.arange(self._num_envs, device=self._device)
+        self._current_position[env_ids] = position
+        self._previous_position[env_ids] = position
+        self._initial_position[env_ids] = position
+        self._target_position[env_ids] = position
+        self._current_velocity[env_ids] = 0.0
+        self._velocity_scale[env_ids] = 0.0
+        self._is_active[env_ids] = False
+
+    def redirect_target(self, target_pos: torch.Tensor, env_mask: torch.Tensor) -> None:
+        """Redirect masked trajectories without resetting their EMA state.
+
+        Args:
+            target_pos: Full ``[num_envs, num_joints]`` target tensor.
+            env_mask: Boolean ``[num_envs]`` tensor selecting trajectories to redirect.
+        """
+        target_pos = self._clamp_to_limits(target_pos)
+        self._target_position.copy_(torch.where(env_mask.unsqueeze(-1), target_pos, self._target_position))
+        self._is_active.logical_or_(env_mask)
+
+    def _clamp_ema_targets(self, target_pos: torch.Tensor, env_ids: torch.Tensor) -> torch.Tensor:
+        """Clamp selected targets without synchronizing device state to the host."""
+        if self.cfg.enable_position_limits and self._joint_limits is not None:
+            limits = self._joint_limits[env_ids]
+            return torch.clamp(target_pos, limits[..., 0], limits[..., 1])
+        return target_pos
+
     def reset(self, env_ids: torch.Tensor | None = None) -> None:
         """Reset profile state for specified environments."""
         if env_ids is None:
@@ -77,13 +107,9 @@ class EMAVelocityProfile(VelocityProfileBase):
         """Set new target and initialize trajectory."""
         if env_ids is None:
             env_ids = torch.arange(self._num_envs, device=self._device)
-            env_mask = torch.ones(self._num_envs, dtype=torch.bool, device=self._device)
-        else:
-            env_mask = torch.zeros(self._num_envs, dtype=torch.bool, device=self._device)
-            env_mask[env_ids] = True
 
         # Validate and potentially clamp target positions
-        target_pos = self._validate_target_positions(target_pos, env_ids)
+        target_pos = self._clamp_ema_targets(target_pos, env_ids)
 
         # Update positions
         self._current_position[env_ids] = current_pos
@@ -124,64 +150,27 @@ class EMAVelocityProfile(VelocityProfileBase):
 
     def compute_next_position(self, dt: float) -> torch.Tensor:
         """Compute next position using exponential moving average."""
-        # Validate dt
         if dt <= 0:
-            print(f"Warning: Invalid dt={dt}, returning current position")
-            return self._current_position.clone()
+            raise ValueError(f"dt must be positive, got {dt}")
 
-        # Store previous position for velocity calculation
         self._previous_position.copy_(self._current_position)
-
-        # Apply EMA formula: pos = scale * target + (1 - scale) * current
-        # Only update active trajectories
-        if self._is_active.any():
-            active_mask = self._is_active.unsqueeze(-1)  # [num_envs, 1]
-
-            new_position = (
-                self._velocity_scale * self._target_position + (1.0 - self._velocity_scale) * self._current_position
-            )
-
-            # Only update active trajectories
-            self._current_position = torch.where(active_mask, new_position, self._current_position)
-
-            # Clamp to joint limits if needed
-            self._current_position = self._clamp_to_limits(self._current_position)
-
-            # Update velocity estimate
-            self._current_velocity = torch.where(
-                active_mask,
-                (self._current_position - self._previous_position) / dt,
-                torch.zeros_like(self._current_velocity),
-            )
-
-            # Check for trajectory completion
-            self._check_completion()
-
+        active = self._is_active.unsqueeze(-1)
+        candidate = self._velocity_scale * self._target_position + (1.0 - self._velocity_scale) * self._current_position
+        candidate = torch.where(active, self._clamp_to_limits(candidate), self._current_position)
+        velocity = torch.where(
+            active,
+            (candidate - self._previous_position) / dt,
+            torch.zeros_like(self._current_velocity),
+        )
+        complete = self._is_active & ((candidate - self._target_position).abs() < self.cfg.position_tolerance).all(
+            dim=1
+        )
+        complete &= (velocity.abs() < self.cfg.velocity_tolerance).all(dim=1)
+        complete_joints = complete.unsqueeze(-1)
+        self._current_position.copy_(torch.where(complete_joints, self._target_position, candidate))
+        self._current_velocity.copy_(torch.where(complete_joints, torch.zeros_like(velocity), velocity))
+        self._is_active.logical_and_(~complete)
         return self._current_position.clone()
-
-    def _check_completion(self) -> None:
-        """Check if any trajectories have completed."""
-        if not self._is_active.any():
-            return
-
-        # Check position tolerance
-        position_error = torch.abs(self._current_position - self._target_position)
-        at_target = position_error < self.cfg.position_tolerance
-
-        # Check velocity tolerance
-        velocity_magnitude = torch.abs(self._current_velocity)
-        at_rest = velocity_magnitude < self.cfg.velocity_tolerance
-
-        # Both conditions must be met for all joints
-        trajectory_complete = (at_target & at_rest).all(dim=1)
-
-        # Mark completed trajectories as inactive
-        newly_completed = self._is_active & trajectory_complete
-        if newly_completed.any():
-            self._is_active[newly_completed] = False
-            # Ensure final position is exactly at target
-            self._current_position[newly_completed] = self._target_position[newly_completed]
-            self._current_velocity[newly_completed] = 0.0
 
     def is_trajectory_complete(self) -> torch.Tensor:
         """Check if trajectories are complete."""
@@ -201,17 +190,9 @@ class EMAVelocityProfile(VelocityProfileBase):
         Since EMA has exponential decay, acceleration is proportional to the
         negative of current velocity (deceleration as approaching target).
         """
-        if self._is_active.any():
-            # For EMA, acceleration = -velocity_scale * current_velocity / dt
-            # This gives the exponential deceleration characteristic of EMA
-            # We approximate dt as 1 timestep since we don't store it
-            acceleration = -self._velocity_scale * self._current_velocity
-
-            # Only return acceleration for active trajectories
-            active_mask = self._is_active.unsqueeze(-1)
-            return torch.where(active_mask, acceleration, torch.zeros_like(acceleration))
-        else:
-            return torch.zeros_like(self._current_position)
+        # We approximate dt as 1 timestep since we don't store it.
+        acceleration = -self._velocity_scale * self._current_velocity
+        return torch.where(self._is_active.unsqueeze(-1), acceleration, torch.zeros_like(acceleration))
 
     def get_time_remaining(self) -> torch.Tensor:
         """Estimate time remaining based on current convergence rate."""

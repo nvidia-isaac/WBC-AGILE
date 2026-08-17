@@ -18,7 +18,7 @@
 from isaaclab.envs import mdp as isaaclab_mdp  # To avoid circular import
 from isaaclab.managers import ObservationGroupCfg as ObsGroup
 from isaaclab.managers import ObservationTermCfg as ObsTerm
-from isaaclab.utils import configclass
+from isaaclab.utils.configclass import configclass
 
 from . import observations_io
 

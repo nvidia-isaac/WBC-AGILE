@@ -16,6 +16,8 @@
 
 import pathlib
 
+from isaaclab_physx.physics import PhysxCfg
+
 import isaaclab.sim as sim_utils
 from isaaclab.assets import AssetBaseCfg
 from isaaclab.envs import ManagerBasedRLEnvCfg
@@ -29,14 +31,13 @@ from isaaclab.managers import TerminationTermCfg as DoneTerm
 from isaaclab.scene import InteractiveSceneCfg
 from isaaclab.sensors import ContactSensorCfg, RayCasterCfg, patterns
 from isaaclab.terrains import TerrainImporterCfg
-from isaaclab.utils import configclass
 from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR, ISAACLAB_NUCLEUS_DIR
-from isaaclab.utils.noise import AdditiveUniformNoiseCfg as Unoise
+from isaaclab.utils.configclass import configclass
+from isaaclab.utils.noise import UniformNoiseCfg as Unoise
 
 from agile.rl_env import mdp
 from agile.rl_env.assets.robots import booster_t1
 from agile.rl_env.mdp.terrains import STAND_UP_ROUGH_TERRAIN_CFG  # noqa: F401, F403
-from agile.rl_env.termination_cfg import DoneTermCfg as DoneTermEx
 
 FILE_DIR = pathlib.Path(__file__).parent
 REPO_DIR = FILE_DIR.parent.parent.parent
@@ -347,16 +348,20 @@ class TerminationsCfg:
 
     time_out = DoneTerm(func=mdp.time_out, time_out=True)
 
-    no_height_progress = DoneTermEx(
+    no_height_progress = DoneTerm(
         func=mdp.no_height_progress,
-        termination_type="bad",
-        sigma=1.0,
         params={
             "asset_cfg": SceneEntityCfg("robot", body_names="Trunk"),
             "sensor_cfg": SceneEntityCfg("height_measurement_sensor"),
             "height_increase_threshold": 0.2,
             "time_limit_s": 10.0,
         },
+    )
+
+    # Reset environments whose non-finite physics state would poison policy observations.
+    invalid_state = DoneTerm(
+        func=mdp.invalid_state,
+        params={"asset_cfg": SceneEntityCfg("robot")},
     )
 
 
@@ -514,9 +519,12 @@ class CurriculumCfg:
         func=mdp.adaptive_force_decay,
         params={
             "action_name": "lift",
-            "standing_height_threshold": booster_t1.DEFAULT_TRUNK_HEIGHT - 0.1,
+            "metric_name": "standing_ratio",
+            "decay_when": "above",
             "threshold": 0.7,
+            "standing_height_threshold": booster_t1.DEFAULT_TRUNK_HEIGHT - 0.1,
             "ema_alpha": 0.01,
+            "decay": 0.9999,
             "disable_threshold": 0.01,
         },
     )
@@ -618,7 +626,9 @@ class T1StandUpEnvCfg(ManagerBasedRLEnvCfg):
         self.sim.physics_material = self.scene.terrain.physics_material
         self.scene.contact_forces.update_period = self.sim.dt
 
-        self.sim.physx.gpu_max_rigid_patch_count = 10 * 2**15
+        if self.sim.physics is None:
+            self.sim.physics = PhysxCfg()
+        self.sim.physics.gpu_max_rigid_patch_count = 10 * 2**15
 
         if self.scene.height_measurement_sensor is not None:
             self.scene.height_measurement_sensor.update_period = self.sim.dt

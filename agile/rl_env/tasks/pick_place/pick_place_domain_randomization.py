@@ -23,8 +23,8 @@ from isaaclab.assets import AssetBase
 from isaaclab.envs import ManagerBasedEnv
 from isaaclab.managers import EventTermCfg as EventTerm
 from isaaclab.managers import SceneEntityCfg
-from isaaclab.utils import configclass
 from isaaclab.utils.assets import NVIDIA_NUCLEUS_DIR
+from isaaclab.utils.configclass import configclass
 
 from agile.rl_env.tasks.pick_place.pick_place_tracking_env_cfg import EventCfg
 

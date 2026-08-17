@@ -114,7 +114,7 @@ def randomize_joint_parameters(
     # joint friction coefficient
     if friction_distribution_params is not None:
         friction_coeff = _randomize_prop_by_op(
-            asset.data.default_joint_friction_coeff.clone(),
+            asset.data.default_joint_friction_coeff.torch.clone(),
             friction_distribution_params,
             env_ids,
             joint_ids,
@@ -129,7 +129,7 @@ def randomize_joint_parameters(
     # joint armature
     if armature_distribution_params is not None:
         armature = _randomize_prop_by_op(
-            asset.data.default_joint_armature.clone(),
+            asset.data.default_joint_armature.torch.clone(),
             armature_distribution_params,
             env_ids,
             joint_ids,
@@ -140,7 +140,7 @@ def randomize_joint_parameters(
 
     # joint position limits
     if lower_limit_distribution_params is not None or upper_limit_distribution_params is not None:
-        joint_pos_limits = asset.data.default_joint_pos_limits.clone()
+        joint_pos_limits = asset.data.default_joint_pos_limits.torch.clone()
         # -- randomize the lower limits
         if lower_limit_distribution_params is not None:
             joint_pos_limits[..., 0] = _randomize_prop_by_op(
@@ -193,7 +193,7 @@ def reset_root_state_uniform_some_standing(
     # extract the used quantities (to enable type-hinting)
     asset: RigidObject | Articulation = env.scene[asset_cfg.name]
     # get default root state
-    root_states = asset.data.default_root_state[env_ids].clone()
+    root_states = asset.data.default_root_state.torch[env_ids].clone()
 
     # poses
     range_list = [pose_range.get(key, (0.0, 0.0)) for key in ["x", "y", "z", "roll", "pitch", "yaw"]]
@@ -263,12 +263,12 @@ def reset_robot_to_trajectory(
     orientations = command.quat_command_e[env_ids]
 
     robot.write_root_pose_to_sim(torch.cat([positions, orientations], dim=-1), env_ids=env_ids)
-    robot.write_root_velocity_to_sim(torch.zeros_like(robot.data.root_vel_w[env_ids]), env_ids=env_ids)
+    robot.write_root_velocity_to_sim(torch.zeros_like(robot.data.root_vel_w.torch[env_ids]), env_ids=env_ids)
 
     # Reset the tracked joints to command positions
     robot.write_joint_state_to_sim(
         command.tracked_joint_pos_command[env_ids],
-        torch.zeros_like(robot.data.joint_vel[..., command.tracked_joint_ids][env_ids]),
+        torch.zeros_like(robot.data.joint_vel.torch[..., command.tracked_joint_ids][env_ids]),
         joint_ids=command.tracked_joint_ids,
         env_ids=env_ids,
     )

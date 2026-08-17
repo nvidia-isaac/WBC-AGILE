@@ -96,7 +96,7 @@ They showed that similar tasks across robots (e.g., G1 vs T1 velocity tracking) 
 
 **Q: Is MuJoCo transfer supported? How is deployment handled?**
 
-**A:** AGILE supports a workflow that exports the policy and an I/O descriptor so the same trained policy can be tested in other simulators (including MuJoCo) and compared across architectures/observations without rewriting the pipeline.
+**A:** AGILE supports MuJoCo evaluation with a trained policy checkpoint and matching YAML config, so policies can be tested across simulators and compared across architectures/observations without rewriting the pipeline.
 
 **Q: Beyond keyboard teleop, what devices can be used?**
 
@@ -156,4 +156,4 @@ They indicated both have been validated on real robots.
 
 **Q: What domain randomization strategy works best for sim-to-sim adaptation?**
 
-**A:** The team suggested the reader to read the "[lessons learned / recommended practices](LESSONS_LEARNED.md)" section in the AGILE repo with guidance on randomization terms and practical recommendations. Empirical experience shows that randomization within proper armature and PD gain ranges matters a lot.
+**A:** The team suggested the reader to read the [training tips](docs/source/training-tips.md) page with guidance on randomization terms and practical recommendations. Empirical experience shows that randomization within proper armature and PD gain ranges matters a lot.

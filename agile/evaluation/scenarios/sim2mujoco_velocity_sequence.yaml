@@ -1,0 +1,58 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+evaluation:
+  task_name: velocity_sequence
+  num_envs: 1
+  episode_length_s: 22.0
+  num_episodes: 1
+  sim2mujoco:
+    validation:
+      balance:
+        min_pelvis_height: 0.5
+        start_time_s: 0.5
+  environments:
+    - env_ids: [0]
+      name: stand_turn_walk_sequence
+      schedule:
+        - time: 0.0
+          commands:
+            base_velocity:
+              lin_vel_x: 0.0
+              lin_vel_y: 0.0
+              ang_vel_z: 0.0
+              base_height: 0.72
+        - time: 2.0
+          commands:
+            base_velocity:
+              lin_vel_x: 0.0
+              lin_vel_y: 0.0
+              ang_vel_z: 0.5
+              base_height: 0.72
+        - time: 6.0
+          commands:
+            base_velocity:
+              lin_vel_x: 0.3
+              lin_vel_y: 0.0
+              ang_vel_z: 0.0
+              base_height: 0.72
+        - time: 10.0
+          commands:
+            base_velocity:
+              lin_vel_x: -0.3
+              lin_vel_y: 0.0
+              ang_vel_z: 0.0
+              base_height: 0.72
+        - time: 14.0
+          commands:
+            base_velocity:
+              lin_vel_x: 0.0
+              lin_vel_y: 0.3
+              ang_vel_z: 0.0
+              base_height: 0.72
+        - time: 18.0
+          commands:
+            base_velocity:
+              lin_vel_x: 0.0
+              lin_vel_y: -0.3
+              ang_vel_z: 0.0
+              base_height: 0.72

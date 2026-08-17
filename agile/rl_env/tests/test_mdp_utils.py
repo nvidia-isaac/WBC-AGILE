@@ -19,10 +19,7 @@ from unittest.mock import MagicMock, patch
 
 import torch
 
-from agile.rl_env.tests.utils import APP_IS_READY
-
-if APP_IS_READY:
-    from isaaclab.managers import SceneEntityCfg
+from isaaclab.managers import SceneEntityCfg
 
 from agile.rl_env.mdp.utils import (
     get_body_velocities_and_forces,
@@ -49,7 +46,8 @@ class TestMDPUtils(unittest.TestCase):
         robot_data.body_pos_w = torch.ones((2, 5, 3), device=self.device)  # 2 envs, 5 bodies, 3D positions
         robot_data.body_vel_w = torch.ones((2, 5, 3), device=self.device)
         robot_data.root_pos_w = torch.zeros((2, 3), device=self.device)
-        robot_data.root_quat_w = torch.tensor([[1.0, 0.0, 0.0, 0.0], [1.0, 0.0, 0.0, 0.0]], device=self.device)
+        # Identity quaternion (x, y, z, w) per Isaac Lab 3.0 convention.
+        robot_data.root_quat_w = torch.tensor([[0.0, 0.0, 0.0, 1.0], [0.0, 0.0, 0.0, 1.0]], device=self.device)
 
         # Create mock robot
         self.robot = MagicMock()
@@ -111,13 +109,12 @@ class TestMDPUtils(unittest.TestCase):
             self.assertEqual(cfg.name, "robot")
 
         # Test with custom config
-        if APP_IS_READY:
-            custom_cfg = SceneEntityCfg("custom_robot")
-            # Update scene_dict to include custom robot
-            self.scene_dict["custom_robot"] = self.robot
-            robot, cfg = get_robot_cfg(self.env, custom_cfg)
-            self.assertEqual(cfg.name, "custom_robot")
-            self.assertEqual(robot, self.robot)
+        custom_cfg = SceneEntityCfg("custom_robot")
+        # Update scene_dict to include custom robot
+        self.scene_dict["custom_robot"] = self.robot
+        robot, cfg = get_robot_cfg(self.env, custom_cfg)
+        self.assertEqual(cfg.name, "custom_robot")
+        self.assertEqual(robot, self.robot)
 
     def test_get_contact_sensor_cfg(self) -> None:
         # Mock SceneEntityCfg for default case
@@ -146,7 +143,7 @@ class TestMDPUtils(unittest.TestCase):
         # Create test data
         positions = torch.tensor([[[1.0, 1.0, 1.0], [2.0, 2.0, 2.0]]], device=self.device)
         root_pos = torch.tensor([[0.0, 0.0, 0.0]], device=self.device)
-        root_quat = torch.tensor([[1.0, 0.0, 0.0, 0.0]], device=self.device)  # Identity quaternion
+        root_quat = torch.tensor([[0.0, 0.0, 0.0, 1.0]], device=self.device)  # Identity quaternion (x, y, z, w)
 
         # Test the function directly by using a simple input case
         result = transform_to_body_frame(positions, root_pos, root_quat)

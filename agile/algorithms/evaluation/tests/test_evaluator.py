@@ -17,27 +17,14 @@
 
 
 import tempfile
-
-from isaaclab.app import AppLauncher
-
-# launch the simulator
-try:
-    app_launcher = AppLauncher(headless=True)
-    simulation_app = app_launcher.app
-    APP_IS_READY = True
-except Exception:
-    APP_IS_READY = False
-
 import unittest
 from unittest.mock import MagicMock, patch
 
 import torch
 
-if APP_IS_READY:
-    from agile.algorithms.evaluation.evaluator import PolicyEvaluator
+from agile.algorithms.evaluation.evaluator import PolicyEvaluator
 
 
-@unittest.skipIf(not APP_IS_READY, "Application is not ready")
 class TestPolicyEvaluator(unittest.TestCase):
     """Test the PolicyEvaluator class."""
 
@@ -380,7 +367,4 @@ class TestPolicyEvaluator(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    unittest.main(exit=False)
-    # Clean up Isaac Sim if we initialized it
-    if simulation_app is not None:
-        simulation_app.close()
+    unittest.main()

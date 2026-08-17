@@ -44,6 +44,10 @@ class MotionData:
             reindexed along the joint axis using this index tensor so that the
             resulting ordering matches the consumer's expected joint order.
         device: Torch device string.
+        quat_xyzw: The motion files store ``body_quat_w`` in ``(w, x, y, z)``
+            order. When ``True`` the quaternions are reordered to ``(x, y, z, w)``
+            on load. Isaac Lab 3.0 consumers must set this (Isaac Lab uses
+            ``xyzw``); the MuJoCo evaluator keeps the default ``wxyz``.
     """
 
     def __init__(
@@ -52,6 +56,7 @@ class MotionData:
         body_indices: Sequence[int] | None = None,
         joint_remap_idx: torch.Tensor | None = None,
         device: str = "cpu",
+        quat_xyzw: bool = False,
     ):
         assert os.path.isfile(motion_file), f"Invalid file path: {motion_file}"
         data = np.load(motion_file)
@@ -70,6 +75,9 @@ class MotionData:
 
         self._body_pos_w = torch.tensor(data["body_pos_w"], dtype=torch.float32, device=device)
         self._body_quat_w = torch.tensor(data["body_quat_w"], dtype=torch.float32, device=device)
+        if quat_xyzw:
+            # Reorder (w, x, y, z) -> (x, y, z, w) for Isaac Lab 3.0 consumers.
+            self._body_quat_w = self._body_quat_w[..., [1, 2, 3, 0]]
         self._body_lin_vel_w = torch.tensor(data["body_lin_vel_w"], dtype=torch.float32, device=device)
         self._body_ang_vel_w = torch.tensor(data["body_ang_vel_w"], dtype=torch.float32, device=device)
 

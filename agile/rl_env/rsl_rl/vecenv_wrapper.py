@@ -22,19 +22,18 @@
 import gymnasium as gym
 import torch
 from rsl_rl.env import VecEnv
+from tensordict import TensorDict
 
 from isaaclab.envs import DirectRLEnv, ManagerBasedRLEnv
+
+from agile.rl_env.rsl_rl_observations import to_rsl_rl_observations
 
 
 class RslRlVecEnvWrapper(VecEnv):
     """Wrap around Isaac Lab environment for RSL-RL library.
 
-    To use asymmetric actor-critic, the environment instance must have the attributes
-    :attr:`num_privileged_obs` (int). This is used by the learning agent to allocate buffers in
-    the trajectory memory. Additionally, the returned observations should have the key "critic"
-    which corresponds to the privileged observations. Since this is optional for some environments,
-    the wrapper checks if these attributes exist. If they don't then the wrapper defaults to
-    zero as number of privileged observations.
+    RSL-RL 5.x consumes observations as a :class:`tensordict.TensorDict`. Observation-group
+    selection is handled by the runner configuration through ``obs_groups``.
 
     .. caution::
 
@@ -81,20 +80,6 @@ class RslRlVecEnvWrapper(VecEnv):
             self.num_actions = self.unwrapped.action_manager.total_action_dim
         else:
             self.num_actions = gym.spaces.flatdim(self.unwrapped.single_action_space)
-        if hasattr(self.unwrapped, "observation_manager"):
-            self.num_obs = self.unwrapped.observation_manager.group_obs_dim["policy"][0]
-        else:
-            self.num_obs = gym.spaces.flatdim(self.unwrapped.single_observation_space["policy"])
-        # -- privileged observations
-        if (
-            hasattr(self.unwrapped, "observation_manager")
-            and "critic" in self.unwrapped.observation_manager.group_obs_dim
-        ):
-            self.num_privileged_obs = self.unwrapped.observation_manager.group_obs_dim["critic"][0]
-        elif hasattr(self.unwrapped, "num_states") and "critic" in self.unwrapped.single_observation_space:
-            self.num_privileged_obs = gym.spaces.flatdim(self.unwrapped.single_observation_space["critic"])
-        else:
-            self.num_privileged_obs = 0
 
         # modify the action space to the clip range
         self._modify_action_space()
@@ -155,13 +140,21 @@ class RslRlVecEnvWrapper(VecEnv):
     Properties
     """
 
-    def get_observations(self) -> tuple[torch.Tensor, dict]:
+    def get_observations(self) -> TensorDict:
         """Return the current observations of the environment."""
+        obs_dict = self._compute_observations()
+        return to_rsl_rl_observations(obs_dict, self.num_envs)
+
+    def get_observations_with_extras(self) -> tuple[TensorDict, dict]:
+        """Return current observations and raw Isaac Lab observations for recording/eval."""
+        obs_dict = self._compute_observations()
+        return to_rsl_rl_observations(obs_dict, self.num_envs), {"observations": obs_dict}
+
+    def _compute_observations(self) -> dict:
+        """Compute raw Isaac Lab observations."""
         if hasattr(self.unwrapped, "observation_manager"):
-            obs_dict = self.unwrapped.observation_manager.compute()
-        else:
-            obs_dict = self.unwrapped._get_observations()
-        return obs_dict["policy"], {"observations": obs_dict}
+            return self.unwrapped.observation_manager.compute()
+        return self.unwrapped._get_observations()
 
     @property
     def episode_length_buf(self) -> torch.Tensor:
@@ -184,23 +177,20 @@ class RslRlVecEnvWrapper(VecEnv):
     def seed(self, seed: int = -1) -> int:  # noqa: D102
         return self.unwrapped.seed(seed)
 
-    def reset(self) -> tuple[torch.Tensor, dict]:  # noqa: D102
+    def reset(self) -> tuple[TensorDict, dict]:  # noqa: D102
         # reset the environment
-        obs_dict, _ = self.env.reset()
+        obs_dict, extras = self.env.reset()
         # return observations
-        return obs_dict["policy"], {"observations": obs_dict}
+        return to_rsl_rl_observations(obs_dict, self.num_envs), extras
 
-    def step(self, actions: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, dict]:
+    def step(self, actions: torch.Tensor) -> tuple[TensorDict, torch.Tensor, torch.Tensor, dict]:
         # clip actions
         if self.clip_actions is not None:
             actions = torch.clamp(actions, -self.clip_actions, self.clip_actions)
         # record step information
         obs_dict, rew, terminated, truncated, extras = self.env.step(actions)
-        # compute dones for compatibility with RSL-RL
+        # compute dones for the RSL-RL VecEnv API
         dones = (terminated | truncated).to(dtype=torch.long)
-        # move extra observations to the extras dict
-        obs = obs_dict["policy"]
-        extras["observations"] = obs_dict
         # move time out information to the extras dict
         # this is only needed for infinite horizon tasks
         if not self.unwrapped.cfg.is_finite_horizon:
@@ -211,7 +201,7 @@ class RslRlVecEnvWrapper(VecEnv):
             self._compute_termination_sigmas(extras)
 
         # return the step information
-        return obs, rew, dones, extras
+        return to_rsl_rl_observations(obs_dict, self.num_envs), rew, dones, extras
 
     def close(self):  # noqa: D102
         return self.env.close()

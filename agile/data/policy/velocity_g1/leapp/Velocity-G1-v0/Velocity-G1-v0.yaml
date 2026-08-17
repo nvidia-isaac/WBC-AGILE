@@ -1,0 +1,238 @@
+models:
+  Velocity-G1-v0:
+    inputs:
+      - name: base_velocity
+        dtype: float32
+        shape:
+          - 1
+          - 4
+        type: tensor
+        kind: command/body/velocity
+        element_names:
+          - - lin_vel_x
+            - lin_vel_y
+            - ang_vel_z
+        isaaclab_connection: command:base_velocity
+      - name: robot_root_lin_vel_b
+        dtype: float32
+        shape:
+          - 1
+          - 3
+        type: tensor
+        kind: state/body/linear_velocity
+        element_names:
+          - - x
+            - y
+            - z
+        isaaclab_connection: state:robot:root_lin_vel_b
+      - name: robot_root_ang_vel_b
+        dtype: float32
+        shape:
+          - 1
+          - 3
+        type: tensor
+        kind: state/body/angular_velocity
+        element_names:
+          - - x
+            - y
+            - z
+        isaaclab_connection: state:robot:root_ang_vel_b
+      - name: robot_root_quat_w
+        dtype: float32
+        shape:
+          - 1
+          - 4
+        type: tensor
+        kind: state/body/rotation
+        element_names:
+          - - qx
+            - qy
+            - qz
+            - qw
+        isaaclab_connection: state:robot:root_quat_w
+      - name: robot_joint_pos
+        dtype: float32
+        shape:
+          - 1
+          - 29
+        type: tensor
+        kind: state/joint/position
+        element_names:
+          - - left_hip_pitch_joint
+            - right_hip_pitch_joint
+            - waist_yaw_joint
+            - left_hip_roll_joint
+            - right_hip_roll_joint
+            - waist_roll_joint
+            - left_hip_yaw_joint
+            - right_hip_yaw_joint
+            - waist_pitch_joint
+            - left_knee_joint
+            - right_knee_joint
+            - left_shoulder_pitch_joint
+            - right_shoulder_pitch_joint
+            - left_ankle_pitch_joint
+            - right_ankle_pitch_joint
+            - left_shoulder_roll_joint
+            - right_shoulder_roll_joint
+            - left_ankle_roll_joint
+            - right_ankle_roll_joint
+            - left_shoulder_yaw_joint
+            - right_shoulder_yaw_joint
+            - left_elbow_joint
+            - right_elbow_joint
+            - left_wrist_roll_joint
+            - right_wrist_roll_joint
+            - left_wrist_pitch_joint
+            - right_wrist_pitch_joint
+            - left_wrist_yaw_joint
+            - right_wrist_yaw_joint
+        isaaclab_connection: state:robot:joint_pos
+      - name: robot_joint_vel
+        dtype: float32
+        shape:
+          - 1
+          - 29
+        type: tensor
+        kind: state/joint/velocity
+        element_names:
+          - - left_hip_pitch_joint
+            - right_hip_pitch_joint
+            - waist_yaw_joint
+            - left_hip_roll_joint
+            - right_hip_roll_joint
+            - waist_roll_joint
+            - left_hip_yaw_joint
+            - right_hip_yaw_joint
+            - waist_pitch_joint
+            - left_knee_joint
+            - right_knee_joint
+            - left_shoulder_pitch_joint
+            - right_shoulder_pitch_joint
+            - left_ankle_pitch_joint
+            - right_ankle_pitch_joint
+            - left_shoulder_roll_joint
+            - right_shoulder_roll_joint
+            - left_ankle_roll_joint
+            - right_ankle_roll_joint
+            - left_shoulder_yaw_joint
+            - right_shoulder_yaw_joint
+            - left_elbow_joint
+            - right_elbow_joint
+            - left_wrist_roll_joint
+            - right_wrist_roll_joint
+            - left_wrist_pitch_joint
+            - right_wrist_pitch_joint
+            - left_wrist_yaw_joint
+            - right_wrist_yaw_joint
+        isaaclab_connection: state:robot:joint_vel
+      - name: last_action_in
+        dtype: float32
+        shape:
+          - 1
+          - 12
+        type: tensor
+    outputs:
+      - name: joint_pos
+        dtype: float32
+        shape:
+          - 1
+          - 12
+        type: tensor
+        kind: target/joint/position
+        element_names:
+          - - left_hip_pitch_joint
+            - right_hip_pitch_joint
+            - left_hip_roll_joint
+            - right_hip_roll_joint
+            - left_hip_yaw_joint
+            - right_hip_yaw_joint
+            - left_knee_joint
+            - right_knee_joint
+            - left_ankle_pitch_joint
+            - right_ankle_pitch_joint
+            - left_ankle_roll_joint
+            - right_ankle_roll_joint
+        isaaclab_connection: write:robot:set_joint_position_target_index
+      - name: last_action_out
+        dtype: float32
+        shape:
+          - 1
+          - 12
+        type: tensor
+      - name: joint_pos_kp_gains
+        dtype: float32
+        shape:
+          - 1
+          - 12
+        type: tensor
+        kind: kp
+        element_names:
+          - - left_hip_pitch_joint
+            - right_hip_pitch_joint
+            - left_hip_roll_joint
+            - right_hip_roll_joint
+            - left_hip_yaw_joint
+            - right_hip_yaw_joint
+            - left_knee_joint
+            - right_knee_joint
+            - left_ankle_pitch_joint
+            - right_ankle_pitch_joint
+            - left_ankle_roll_joint
+            - right_ankle_roll_joint
+        isaaclab_connection: write:robot:write_joint_stiffness_to_sim_index
+      - name: joint_pos_kd_gains
+        dtype: float32
+        shape:
+          - 1
+          - 12
+        type: tensor
+        kind: kd
+        element_names:
+          - - left_hip_pitch_joint
+            - right_hip_pitch_joint
+            - left_hip_roll_joint
+            - right_hip_roll_joint
+            - left_hip_yaw_joint
+            - right_hip_yaw_joint
+            - left_knee_joint
+            - right_knee_joint
+            - left_ankle_pitch_joint
+            - right_ankle_pitch_joint
+            - left_ankle_roll_joint
+            - right_ankle_roll_joint
+        isaaclab_connection: write:robot:write_joint_damping_to_sim_index
+    parameters:
+      model_path: Velocity-G1-v0.onnx
+      md5sum: f38b037bd50a2734c9418bba14a05377
+      sha256sum: 4c92c5a64d1220ab02b042e77bdd69bcd2c0310590755c3dd53b5bde229d26e4
+      backend: onnx
+      opset_version: 20
+pipeline:
+  data_flow: {}
+  feedback_flow:
+    Velocity-G1-v0/last_action_out:
+      - Velocity-G1-v0/last_action_in
+  initial_values: Velocity-G1-v0_initial_values.safetensors
+  inputs:
+    Velocity-G1-v0:
+      - base_velocity
+      - robot_root_lin_vel_b
+      - robot_root_ang_vel_b
+      - robot_root_quat_w
+      - robot_joint_pos
+      - robot_joint_vel
+  outputs:
+    Velocity-G1-v0:
+      - joint_pos
+      - joint_pos_kp_gains
+      - joint_pos_kd_gains
+  configs:
+    frequency: 50.0
+system information:
+  cuda version: '12.6'
+  leapp config version: '1.1'
+  leapp version: 0.5.2
+  os: Ubuntu 24.04
+  python version: 3.12.12
+  torch version: 2.11.0+cu126

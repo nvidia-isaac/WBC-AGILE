@@ -17,6 +17,8 @@ from __future__ import annotations
 
 from dataclasses import MISSING
 
+from isaaclab_physx.physics import PhysxCfg
+
 import isaaclab.sim as sim_utils
 import isaaclab.terrains as terrain_gen
 from isaaclab.assets import ArticulationCfg, AssetBaseCfg, RigidObjectCfg
@@ -30,15 +32,16 @@ from isaaclab.managers import SceneEntityCfg
 from isaaclab.managers import TerminationTermCfg as DoneTerm
 
 from isaaclab.markers.config import FRAME_MARKER_CFG  # isort: skip
+
+import isaaclab_tasks.manager_based.manipulation.lift.mdp.rewards as lift_rewards
 from isaaclab.scene import InteractiveSceneCfg
 from isaaclab.sensors import ContactSensorCfg, FrameTransformerCfg
 from isaaclab.sensors.frame_transformer.frame_transformer_cfg import OffsetCfg
 from isaaclab.sim.schemas.schemas_cfg import RigidBodyPropertiesCfg
 from isaaclab.sim.spawners.wrappers import MultiUsdFileCfg
-from isaaclab.utils import configclass
 from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR
-from isaaclab.utils.noise import AdditiveUniformNoiseCfg as Unoise
-from isaaclab_tasks.manager_based.manipulation.lift.mdp import rewards as lift_rewards
+from isaaclab.utils.configclass import configclass
+from isaaclab.utils.noise import UniformNoiseCfg as Unoise
 
 from agile.rl_env import mdp
 from agile.rl_env.assets.robots.unitree_g1 import (
@@ -62,7 +65,12 @@ from agile.rl_env.mdp.actions.actions_cfg import (
 class PickPlaceTrackingSceneCfg(InteractiveSceneCfg):
     """Configuration for the pick-place tracking scene with a legged robot."""
 
-    terrain = terrain_gen.TerrainImporterCfg(prim_path="/World/ground", terrain_type="plane", debug_vis=False)
+    terrain = terrain_gen.TerrainImporterCfg(
+        prim_path="/World/ground",
+        terrain_type="plane",
+        debug_vis=False,
+        visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.65, 0.65, 0.65)),
+    )
 
     # robots
     robot: ArticulationCfg = MISSING
@@ -76,7 +84,7 @@ class PickPlaceTrackingSceneCfg(InteractiveSceneCfg):
     # fix object
     fixture_structure = AssetBaseCfg(
         prim_path="/World/envs/env_.*/fixture_structure",
-        init_state=AssetBaseCfg.InitialStateCfg(pos=[0.0, 0.0, 0.0], rot=[1.0, 0.0, 0.0, 0.0]),
+        init_state=AssetBaseCfg.InitialStateCfg(pos=[0.0, 0.0, 0.0], rot=[0.0, 0.0, 0.0, 1.0]),
         spawn=sim_utils.UsdFileCfg(
             usd_path=f"{ISAAC_NUCLEUS_DIR}/IsaacLab/Mimic/exhaust_pipe_task/exhaust_pipe_assets/table.usd",
             scale=(0.8, 0.8, 0.92),
@@ -110,13 +118,13 @@ class PickPlaceTrackingSceneCfg(InteractiveSceneCfg):
             ),
             mass_props=sim_utils.MassPropertiesCfg(mass=0.2),
         ),
-        init_state=RigidObjectCfg.InitialStateCfg(pos=[0.0, 0.0, 0.0], rot=[1.0, 0.0, 0.0, 0.0]),
+        init_state=RigidObjectCfg.InitialStateCfg(pos=[0.0, 0.0, 0.0], rot=[0.0, 0.0, 0.0, 1.0]),
     )
 
     # End-effector frame transformer
     ee_frame: FrameTransformerCfg = FrameTransformerCfg(
         prim_path="{ENV_REGEX_NS}/Robot/pelvis",
-        debug_vis=True,
+        debug_vis=False,
         visualizer_cfg=FRAME_MARKER_CFG.replace(prim_path="/Visuals/FrameTransformer").replace(
             markers={"frame": FRAME_MARKER_CFG.markers["frame"].replace(scale=(0.1, 0.1, 0.1))}
         ),
@@ -126,7 +134,7 @@ class PickPlaceTrackingSceneCfg(InteractiveSceneCfg):
                 name="right_hand_palm",
                 offset=OffsetCfg(
                     pos=[0.05, 0.01, 0.0],
-                    rot=[1.0, 0.0, 0.0, 0.0],
+                    rot=[0.0, 0.0, 0.0, 1.0],
                 ),
             ),
         ],
@@ -166,7 +174,7 @@ class CommandsCfg:
         file_path="",
         pos_offset=(0.0, 0.0, 0.06814659),
         object_name="object",
-        debug_vis=True,
+        debug_vis=False,
     )
 
 
@@ -189,7 +197,7 @@ class ActionsCfg:
         asset_name="robot",
         joint_names=LEG_JOINT_NAMES,
         obs_group_name="agile_policy",  # need to be the same name as the on in ObservationCfg
-        policy_path="agile/data/policy/velocity_height_g1/unitree_g1_velocity_height_teacher.pt",
+        policy_path="agile/data/policy/velocity_height_g1/unitree_g1_velocity_height_teacher_torchscript.pt",
         clip={"vx": (-0.2, 0.5), "vy": (-0.4, 0.4), "wz": (-0.5, 0.5), "height": (0.65, 0.72)},
     )
 
@@ -591,7 +599,9 @@ class PickPlaceTrackingEnvCfg(ManagerBasedRLEnvCfg):
         self.sim.dt = 0.005
         self.sim.render_interval = self.decimation
         self.sim.physics_material = self.scene.terrain.physics_material
-        self.sim.physx.gpu_max_rigid_patch_count = 10 * 2**15
+        if self.sim.physics is None:
+            self.sim.physics = PhysxCfg()
+        self.sim.physics.gpu_max_rigid_patch_count = 10 * 2**15
         # viewer settings
         self.viewer.eye = (-2.5, -5.0, 2.0)
         self.viewer.lookat = (0.0, 0.0, 0.75)

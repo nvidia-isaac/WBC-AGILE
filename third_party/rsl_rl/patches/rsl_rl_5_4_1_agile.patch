@@ -1,0 +1,923 @@
+diff --git a/rsl_rl/algorithms/distillation.py b/rsl_rl/algorithms/distillation.py
+index 0269bf5..0c5b768 100644
+--- a/rsl_rl/algorithms/distillation.py
++++ b/rsl_rl/algorithms/distillation.py
+@@ -11,6 +11,7 @@ import torch.nn as nn
+ from tensordict import TensorDict
+
+ from rsl_rl.env import VecEnv
++from rsl_rl.extensions import Symmetry, resolve_symmetry_config
+ from rsl_rl.models import MLPModel
+ from rsl_rl.storage import RolloutStorage
+ from rsl_rl.utils import compile_model, resolve_callable, resolve_obs_groups, resolve_optimizer
+@@ -40,6 +41,8 @@ class Distillation:
+         loss_type: str = "mse",
+         optimizer: str = "adam",
+         device: str = "cpu",
++        weight_decay: float = 0.0,
++        symmetry_cfg: dict | None = None,
+         # Distributed training parameters
+         multi_gpu_cfg: dict | None = None,
+         **kwargs: dict,  # handle unused config parameters
+@@ -60,6 +63,12 @@ class Distillation:
+         # Distillation components
+         self.student = student.to(self.device)
+         self.teacher = teacher.to(self.device)
++        self.teacher_loaded = getattr(teacher, "teacher_loaded", False)
++
++        if symmetry_cfg is not None and (student.is_recurrent or teacher.is_recurrent):
++            print("[WARNING] Symmetry loss is not supported for recurrent distillation policies. Disabling symmetry.")
++            symmetry_cfg = None
++        self.symmetry = Symmetry(**symmetry_cfg) if symmetry_cfg else None
+
+         # Handles to the uncompiled modules for state_dict operations and export. If compilation is disabled, these
+         # simply alias ``self.student`` / ``self.teacher``.
+@@ -67,7 +76,9 @@ class Distillation:
+         self._raw_teacher = self.teacher
+
+         # Create the optimizer
+-        self.optimizer = resolve_optimizer(optimizer)(self.student.parameters(), lr=learning_rate)  # type: ignore
++        self.optimizer = resolve_optimizer(optimizer)(
++            self.student.parameters(), lr=learning_rate, weight_decay=weight_decay
++        )  # type: ignore
+
+         # Add storage
+         self.storage = storage
+@@ -125,10 +136,11 @@ class Distillation:
+         """Run optimization epochs over stored batches and return mean losses."""
+         self.num_updates += 1
+         mean_behavior_loss = 0
+-        loss = 0
++        mean_symmetry_loss = 0 if self.symmetry else None
++        loss = torch.tensor(0.0, device=self.device)
+         cnt = 0
+
+-        for epoch in range(self.num_learning_epochs):
++        for _epoch in range(self.num_learning_epochs):
+             self.student.reset(hidden_state=self.last_hidden_states[0])
+             self.teacher.reset(hidden_state=self.last_hidden_states[1])
+             self.student.detach_hidden_state()
+@@ -139,8 +151,24 @@ class Distillation:
+                 # Behavior cloning loss
+                 behavior_loss = self.loss_fn(actions, batch.privileged_actions)
+
+-                # Total loss
+-                loss = loss + behavior_loss
++                if self.symmetry and self.symmetry.use_mirror_loss:
++                    obs_aug, actions_aug = self.symmetry.data_augmentation_func(
++                        env=self.symmetry.env,
++                        obs=batch.observations,
++                        actions=actions.detach(),
++                    )
++                    original_batch_size = batch.observations.batch_size[0]
++                    actions_sym = self.student(obs_aug[original_batch_size:])
++                    symmetry_loss = nn.functional.mse_loss(
++                        actions_sym,
++                        actions_aug[original_batch_size:].detach(),
++                    )
++                    loss = loss + behavior_loss + self.symmetry.mirror_loss_coeff * symmetry_loss
++                    if mean_symmetry_loss is not None:
++                        mean_symmetry_loss += symmetry_loss.item()
++                else:
++                    loss = loss + behavior_loss
++
+                 mean_behavior_loss += behavior_loss.item()
+                 cnt += 1
+
+@@ -154,7 +182,7 @@ class Distillation:
+                         nn.utils.clip_grad_norm_(self.student.parameters(), self.max_grad_norm)
+                     self.optimizer.step()
+                     self.student.detach_hidden_state()
+-                    loss = 0
++                    loss = torch.tensor(0.0, device=self.device)
+
+                 # Reset dones
+                 self.student.reset(batch.dones.view(-1))
+@@ -162,12 +190,16 @@ class Distillation:
+                 self.student.detach_hidden_state(batch.dones.view(-1))
+
+         mean_behavior_loss /= cnt
++        if mean_symmetry_loss is not None:
++            mean_symmetry_loss /= cnt
+         self.storage.clear()
+         self.last_hidden_states = (self.student.get_hidden_state(), self.teacher.get_hidden_state())
+         self.student.detach_hidden_state()
+
+         # Construct the loss dictionary
+         loss_dict = {"behavior": mean_behavior_loss}
++        if self.symmetry:
++            loss_dict["symmetry"] = mean_symmetry_loss
+
+         return loss_dict
+
+@@ -194,7 +226,7 @@ class Distillation:
+     def load(self, loaded_dict: dict, load_cfg: dict | None, strict: bool) -> bool:
+         """Load specified models from a saved dict."""
+         # If no load_cfg is provided, determine what to load automatically
+-        if load_cfg is None and any("actor_state_dict" in key for key in loaded_dict):  # Load from RL training
++        if load_cfg is None and "actor_state_dict" in loaded_dict:  # Load teacher from PPO training
+             load_cfg = {"teacher": True, "iteration": False}  # Only load teacher by default
+         elif load_cfg is None:  # Load from distillation training
+             load_cfg = {
+@@ -243,13 +275,11 @@ class Distillation:
+         default_sets = ["student", "teacher"]
+         cfg["obs_groups"] = resolve_obs_groups(obs, cfg["obs_groups"], default_sets)
+
+-        # Distillation is not compatible with RND and symmetry extensions
++        # Distillation consumes teacher actions, so intrinsic rewards are not used here.
+         if cfg["algorithm"].get("rnd_cfg") is not None:
+             raise ValueError("The RND extension is not compatible with Distillation.")
+         cfg["algorithm"]["rnd_cfg"] = None
+-        if cfg["algorithm"].get("symmetry_cfg") is not None:
+-            raise ValueError("The symmetry extension is not compatible with Distillation.")
+-        cfg["algorithm"]["symmetry_cfg"] = None
++        cfg["algorithm"] = resolve_symmetry_config(cfg["algorithm"], env)
+
+         # Initialize the policy
+         student: MLPModel = student_class(obs, cfg["obs_groups"], "student", env.num_actions, **cfg["student"]).to(
+diff --git a/rsl_rl/algorithms/ppo.py b/rsl_rl/algorithms/ppo.py
+index f73598c..cd1c586 100644
+--- a/rsl_rl/algorithms/ppo.py
++++ b/rsl_rl/algorithms/ppo.py
+@@ -6,14 +6,16 @@
+
+ from __future__ import annotations
+
++from itertools import chain
++
+ import torch
+ import torch.nn as nn
+-from itertools import chain
+ from tensordict import TensorDict
+
+ from rsl_rl.env import VecEnv
+ from rsl_rl.extensions import RandomNetworkDistillation, Symmetry, resolve_rnd_config, resolve_symmetry_config
+ from rsl_rl.models import MLPModel
++from rsl_rl.modules import ReturnVarianceNormalization
+ from rsl_rl.storage import RolloutStorage
+ from rsl_rl.utils import compile_model, resolve_callable, resolve_obs_groups, resolve_optimizer
+
+@@ -57,6 +59,10 @@ class PPO:
+         symmetry_cfg: dict | None = None,
+         # Distributed training parameters
+         multi_gpu_cfg: dict | None = None,
++        # AGILE extensions
++        critic_warmup_steps: int = 0,
++        l2c2_cfg: dict | None = None,
++        reward_normalization_cfg: dict | None = None,
+     ) -> None:
+         """Initialize the algorithm with models, storage, and optimization settings."""
+         # Device-related parameters
+@@ -83,6 +89,24 @@ class PPO:
+         self.actor = actor.to(self.device)
+         self.critic = critic.to(self.device)
+
++        # L2C2 extension
++        self.use_l2c2 = l2c2_cfg is not None
++        self.lambda_actor = l2c2_cfg.get("lambda_actor", 0.0) if l2c2_cfg else 0.0
++        self.lambda_critic = l2c2_cfg.get("lambda_critic", 0.0) if l2c2_cfg else 0.0
++
++        # Reward normalization extension
++        if reward_normalization_cfg is not None:
++            self.reward_normalizer = ReturnVarianceNormalization(
++                shape=[1],
++                eps=reward_normalization_cfg["epsilon"],
++                gamma=gamma,
++                decay=reward_normalization_cfg["decay"],
++                return_scale_decay=reward_normalization_cfg.get("return_scale_decay", 0.999),
++                outlier_threshold=reward_normalization_cfg.get("outlier_threshold", 10.0),
++            ).to(self.device)
++        else:
++            self.reward_normalizer = None
++
+         # Handles to the uncompiled modules for state_dict operations and export. If compilation is disabled, these
+         # simply alias ``self.actor`` / ``self.critic``.
+         self._raw_actor = self.actor
+@@ -111,6 +135,8 @@ class PPO:
+         self.schedule = schedule
+         self.learning_rate = learning_rate
+         self.normalize_advantage_per_mini_batch = normalize_advantage_per_mini_batch
++        self.critic_warmup_steps = critic_warmup_steps
++        self.update_counter = 0
+
+     def act(self, obs: TensorDict) -> torch.Tensor:
+         """Sample actions and store transition data."""
+@@ -137,7 +163,10 @@ class PPO:
+
+         # Record the rewards and dones
+         # Note: We clone here because later on we bootstrap the rewards based on timeouts
+-        self.transition.rewards = rewards.clone()
++        if self.reward_normalizer is not None:
++            self.transition.rewards = self.reward_normalizer(rewards.clone())
++        else:
++            self.transition.rewards = rewards.clone()
+         self.transition.dones = dones
+
+         # Compute the intrinsic rewards and add to extrinsic rewards
+@@ -154,6 +183,26 @@ class PPO:
+                 1,
+             )
+
++        # AGILE termination shaping: value-neutral bootstrap plus sigma penalty/bonus.
++        time_outs = extras.get("time_outs", torch.zeros_like(dones)).to(self.device)
++        not_timed_out = (~time_outs.bool()).float()
++        if "bad_termination_sigma" in extras:
++            bad_sigma = extras["bad_termination_sigma"].to(self.device)
++            bad_mask = (bad_sigma > 0).float() * not_timed_out
++            self.transition.rewards += self.gamma * torch.squeeze(
++                self.transition.values * bad_mask.unsqueeze(1),  # type: ignore
++                1,
++            )
++            self.transition.rewards -= bad_sigma
++        if "good_termination_sigma" in extras:
++            good_sigma = extras["good_termination_sigma"].to(self.device)
++            good_mask = (good_sigma > 0).float() * not_timed_out
++            self.transition.rewards += self.gamma * torch.squeeze(
++                self.transition.values * good_mask.unsqueeze(1),  # type: ignore
++                1,
++            )
++            self.transition.rewards += good_sigma
++
+         # Record the transition
+         self.storage.add_transition(self.transition)
+         self.transition.clear()
+@@ -186,6 +235,8 @@ class PPO:
+         # Normalize the advantages if per minibatch normalization is not used
+         if not self.normalize_advantage_per_mini_batch:
+             st.advantages = (st.advantages - st.advantages.mean()) / (st.advantages.std() + 1e-8)
++        if self.reward_normalizer is not None:
++            self.reward_normalizer.update_return_scale(st.returns)
+
+     def update(self) -> dict[str, float]:
+         """Run optimization epochs over stored batches and return mean losses."""
+@@ -196,6 +247,9 @@ class PPO:
+         mean_rnd_loss = 0 if self.rnd else None
+         # Symmetry loss
+         mean_symmetry_loss = 0 if self.symmetry else None
++        # L2C2 loss
++        mean_l2c2_actor_loss = 0 if self.use_l2c2 else None
++        mean_l2c2_critic_loss = 0 if self.use_l2c2 else None
+
+         # Get mini-batch generator
+         if self.actor.is_recurrent or self.critic.is_recurrent:
+@@ -275,7 +329,18 @@ class PPO:
+             else:
+                 value_loss = (batch.returns - values).pow(2).mean()
+
+-            loss = surrogate_loss + self.value_loss_coef * value_loss - self.entropy_coef * entropy.mean()
++            if self.update_counter < self.critic_warmup_steps:
++                loss = value_loss
++                self.update_counter += 1
++            elif self.critic_warmup_steps > 0 and self.update_counter < 2 * self.critic_warmup_steps:
++                self.learning_rate = 1e-5
++                for param_group in self.optimizer.param_groups:
++                    param_group["lr"] = self.learning_rate
++                scale = (self.update_counter - self.critic_warmup_steps) / self.critic_warmup_steps
++                loss = self.value_loss_coef * value_loss + (surrogate_loss - self.entropy_coef * entropy.mean()) * scale
++                self.update_counter += 1
++            else:
++                loss = surrogate_loss + self.value_loss_coef * value_loss - self.entropy_coef * entropy.mean()
+
+             # RND loss
+             rnd_loss = self.rnd.compute_loss(batch.observations[:original_batch_size]) if self.rnd else None  # type: ignore
+@@ -286,6 +351,25 @@ class PPO:
+                 if self.symmetry.use_mirror_loss:
+                     loss = loss + self.symmetry.mirror_loss_coeff * symmetry_loss
+
++            # L2C2 regularization
++            if self.use_l2c2 and batch.l2c2_batch is not None:
++                prev_obs, next_obs, done_mask = batch.l2c2_batch
++                valid_mask = ~done_mask
++                if valid_mask.any():
++                    interpolated_obs = _interpolate_observations(prev_obs, next_obs, self.device)
++                    l2c2_actor_loss = nn.functional.mse_loss(
++                        self.actor(interpolated_obs[valid_mask]),
++                        self.actor(prev_obs[valid_mask]),
++                    )
++                    l2c2_critic_loss = nn.functional.mse_loss(
++                        self.critic(interpolated_obs[valid_mask]),
++                        self.critic(prev_obs[valid_mask]),
++                    )
++                else:
++                    l2c2_actor_loss = loss.new_zeros(())
++                    l2c2_critic_loss = loss.new_zeros(())
++                loss = loss + self.lambda_actor * l2c2_actor_loss + self.lambda_critic * l2c2_critic_loss
++
+             # Compute the gradients for PPO
+             self.optimizer.zero_grad()
+             loss.backward()
+@@ -316,6 +400,10 @@ class PPO:
+             # Symmetry loss
+             if mean_symmetry_loss is not None:
+                 mean_symmetry_loss += symmetry_loss.item()
++            # L2C2 loss
++            if mean_l2c2_actor_loss is not None:
++                mean_l2c2_actor_loss += l2c2_actor_loss.item()
++                mean_l2c2_critic_loss += l2c2_critic_loss.item()
+
+         # Divide the losses by the number of updates
+         num_updates = self.num_learning_epochs * self.num_mini_batches
+@@ -326,6 +414,9 @@ class PPO:
+             mean_rnd_loss /= num_updates
+         if mean_symmetry_loss is not None:
+             mean_symmetry_loss /= num_updates
++        if mean_l2c2_actor_loss is not None:
++            mean_l2c2_actor_loss /= num_updates
++            mean_l2c2_critic_loss /= num_updates
+
+         # Construct the loss dictionary
+         loss_dict = {
+@@ -337,6 +428,9 @@ class PPO:
+             loss_dict["rnd"] = mean_rnd_loss
+         if self.symmetry:
+             loss_dict["symmetry"] = mean_symmetry_loss
++        if self.use_l2c2:
++            loss_dict["l2c2_actor"] = mean_l2c2_actor_loss
++            loss_dict["l2c2_critic"] = mean_l2c2_critic_loss
+
+         # Clear the storage
+         self.storage.clear()
+@@ -349,6 +443,8 @@ class PPO:
+         self.critic.train()
+         if self.rnd:
+             self.rnd.train()
++        if self.reward_normalizer is not None:
++            self.reward_normalizer.train()
+
+     def eval_mode(self) -> None:
+         """Set evaluation mode for learnable models."""
+@@ -356,6 +452,8 @@ class PPO:
+         self.critic.eval()
+         if self.rnd:
+             self.rnd.eval()
++        if self.reward_normalizer is not None:
++            self.reward_normalizer.eval()
+
+     def save(self) -> dict:
+         """Return a dict of all models for saving."""
+@@ -367,6 +465,8 @@ class PPO:
+         if self.rnd:
+             saved_dict["rnd_state_dict"] = self.rnd.state_dict()
+             saved_dict["rnd_optimizer_state_dict"] = self.rnd.optimizer.state_dict()
++        if self.reward_normalizer is not None:
++            saved_dict["reward_normalizer_state_dict"] = self.reward_normalizer.state_dict()
+         return saved_dict
+
+     def load(self, loaded_dict: dict, load_cfg: dict | None, strict: bool) -> bool:
+@@ -391,6 +491,8 @@ class PPO:
+         if load_cfg.get("rnd") and self.rnd:
+             self.rnd.load_state_dict(loaded_dict["rnd_state_dict"], strict=strict)
+             self.rnd.optimizer.load_state_dict(loaded_dict["rnd_optimizer_state_dict"])
++        if self.reward_normalizer is not None and "reward_normalizer_state_dict" in loaded_dict:
++            self.reward_normalizer.load_state_dict(loaded_dict["reward_normalizer_state_dict"], strict=strict)
+         return load_cfg.get("iteration", False)
+
+     def get_policy(self) -> MLPModel:
+@@ -437,7 +539,8 @@ class PPO:
+         print(f"Critic Model: {critic}")
+
+         # Initialize the storage
+-        storage = RolloutStorage("rl", env.num_envs, cfg["num_steps_per_env"], obs, [env.num_actions], device)
++        use_l2c2 = cfg["algorithm"].get("l2c2_cfg") is not None
++        storage = RolloutStorage("rl", env.num_envs, cfg["num_steps_per_env"], obs, [env.num_actions], device, use_l2c2)
+
+         # Initialize the algorithm
+         alg: PPO = alg_class(actor, critic, storage, device=device, **cfg["algorithm"], multi_gpu_cfg=cfg["multi_gpu"])
+@@ -485,3 +588,18 @@ class PPO:
+                 param.grad.data.copy_(all_grads[offset : offset + numel].view_as(param.grad.data))
+                 # Update the offset for the next parameter
+                 offset += numel
++
++
++def _interpolate_observations(prev_obs: TensorDict, next_obs: TensorDict, device: str) -> TensorDict:
++    """Interpolate each observation leaf independently for L2C2 regularization."""
++    batch_size = prev_obs.batch_size[0]
++    interpolated = {}
++    for key, prev_value in prev_obs.items():
++        next_value = next_obs[key]
++        if not prev_value.dtype.is_floating_point:
++            interpolated[key] = prev_value
++            continue
++        shape = [batch_size] + [1] * (prev_value.dim() - 1)
++        alpha = torch.rand(shape, device=device, dtype=prev_value.dtype)
++        interpolated[key] = prev_value + alpha * (next_value - prev_value)
++    return TensorDict(interpolated, batch_size=prev_obs.batch_size, device=prev_obs.device)
+diff --git a/rsl_rl/models/__init__.py b/rsl_rl/models/__init__.py
+index 3bfe433..c28adbb 100644
+--- a/rsl_rl/models/__init__.py
++++ b/rsl_rl/models/__init__.py
+@@ -6,11 +6,13 @@
+ """Neural models for the learning algorithm."""
+
+ from .cnn_model import CNNModel
++from .jit_teacher_model import JitTeacherModel
+ from .mlp_model import MLPModel
+ from .rnn_model import RNNModel
+
+ __all__ = [
+     "CNNModel",
++    "JitTeacherModel",
+     "MLPModel",
+     "RNNModel",
+ ]
+diff --git a/rsl_rl/models/jit_teacher_model.py b/rsl_rl/models/jit_teacher_model.py
+new file mode 100644
+index 0000000..6c62924
+--- /dev/null
++++ b/rsl_rl/models/jit_teacher_model.py
+@@ -0,0 +1,61 @@
++# Copyright (c) 2021-2026, ETH Zurich and NVIDIA CORPORATION
++# All rights reserved.
++#
++# SPDX-License-Identifier: BSD-3-Clause
++
++from __future__ import annotations
++
++import torch
++from tensordict import TensorDict
++
++from rsl_rl.modules import HiddenState
++
++
++class JitTeacherModel(torch.nn.Module):
++    """Teacher model backed by an exported TorchScript policy.
++
++    AGILE distills deployable student policies from already-exported teacher
++    policies. Public rsl_rl 5.x expects the teacher to be a model constructed
++    from Python architecture config, so this adapter exposes the same minimal
++    model interface while delegating inference to ``torch.jit.load``.
++    """
++
++    is_recurrent: bool = False
++    teacher_loaded: bool = True
++
++    def __init__(
++        self,
++        obs: TensorDict,
++        obs_groups: dict[str, list[str]],
++        obs_set: str,
++        output_dim: int,  # noqa: ARG002
++        teacher_path: str,
++    ) -> None:
++        super().__init__()
++        self.obs_groups = obs_groups[obs_set]
++        self.teacher = torch.jit.load(teacher_path)
++        self.teacher.eval()
++
++    def forward(
++        self,
++        obs: TensorDict,
++        masks: torch.Tensor | None = None,  # noqa: ARG002
++        hidden_state: HiddenState = None,  # noqa: ARG002
++        stochastic_output: bool = False,  # noqa: ARG002
++    ) -> torch.Tensor:
++        latent = torch.cat([obs[obs_group] for obs_group in self.obs_groups], dim=-1)
++        with torch.no_grad():
++            return self.teacher(latent)
++
++    def reset(self, dones: torch.Tensor | None = None, hidden_state: HiddenState = None) -> None:  # noqa: ARG002
++        if hasattr(self.teacher, "reset"):
++            self.teacher.reset()
++
++    def get_hidden_state(self) -> HiddenState:
++        return None
++
++    def detach_hidden_state(self, dones: torch.Tensor | None = None) -> None:  # noqa: ARG002
++        pass
++
++    def update_normalization(self, obs: TensorDict) -> None:  # noqa: ARG002
++        pass
+diff --git a/rsl_rl/models/mlp_model.py b/rsl_rl/models/mlp_model.py
+index b8bcfca..415eb41 100644
+--- a/rsl_rl/models/mlp_model.py
++++ b/rsl_rl/models/mlp_model.py
+@@ -7,6 +7,7 @@
+ from __future__ import annotations
+
+ import copy
++
+ import torch
+ import torch.nn as nn
+ from tensordict import TensorDict
+@@ -37,6 +38,7 @@ class MLPModel(nn.Module):
+         activation: str = "elu",
+         obs_normalization: bool = False,
+         distribution_cfg: dict | None = None,
++        dropout_rate: float = 0.0,
+     ) -> None:
+         """Initialize the MLP-based model.
+
+@@ -73,7 +75,7 @@ class MLPModel(nn.Module):
+             mlp_output_dim = output_dim
+
+         # MLP
+-        self.mlp = MLP(self._get_latent_dim(), mlp_output_dim, hidden_dims, activation)
++        self.mlp = MLP(self._get_latent_dim(), mlp_output_dim, hidden_dims, activation, dropout_rate=dropout_rate)
+
+         # Initialize distribution-specific MLP weights
+         if self.distribution is not None:
+diff --git a/rsl_rl/models/rnn_model.py b/rsl_rl/models/rnn_model.py
+index e464d5e..7ad69fc 100644
+--- a/rsl_rl/models/rnn_model.py
++++ b/rsl_rl/models/rnn_model.py
+@@ -7,6 +7,7 @@
+ from __future__ import annotations
+
+ import copy
++
+ import torch
+ import torch.nn as nn
+ from tensordict import TensorDict
+@@ -40,6 +41,7 @@ class RNNModel(MLPModel):
+         rnn_type: str = "lstm",
+         rnn_hidden_dim: int = 256,
+         rnn_num_layers: int = 1,
++        dropout_rate: float = 0.0,
+     ) -> None:
+         """Initialize the RNN-based model.
+
+@@ -55,6 +57,7 @@ class RNNModel(MLPModel):
+             rnn_type: Type of RNN to use ("lstm" or "gru").
+             rnn_hidden_dim: Dimension of the RNN hidden state.
+             rnn_num_layers: Number of RNN layers.
++            dropout_rate: Dropout rate for the MLP head.
+         """
+         self.latent_dim = rnn_hidden_dim
+
+@@ -68,6 +71,7 @@ class RNNModel(MLPModel):
+             activation,
+             obs_normalization,
+             distribution_cfg,
++            dropout_rate,
+         )
+
+         # RNN
+diff --git a/rsl_rl/modules/__init__.py b/rsl_rl/modules/__init__.py
+index 9a09a2f..75a355d 100644
+--- a/rsl_rl/modules/__init__.py
++++ b/rsl_rl/modules/__init__.py
+@@ -8,7 +8,7 @@
+ from .cnn import CNN
+ from .distribution import BetaDistribution, Distribution, GaussianDistribution, HeteroscedasticGaussianDistribution
+ from .mlp import MLP
+-from .normalization import EmpiricalDiscountedVariationNormalization, EmpiricalNormalization
++from .normalization import EmpiricalDiscountedVariationNormalization, EmpiricalNormalization, ReturnVarianceNormalization
+ from .rnn import RNN, HiddenState
+
+ __all__ = [
+@@ -22,4 +22,5 @@ __all__ = [
+     "GaussianDistribution",
+     "HeteroscedasticGaussianDistribution",
+     "HiddenState",
++    "ReturnVarianceNormalization",
+ ]
+diff --git a/rsl_rl/modules/mlp.py b/rsl_rl/modules/mlp.py
+index e0549ec..8b7179c 100644
+--- a/rsl_rl/modules/mlp.py
++++ b/rsl_rl/modules/mlp.py
+@@ -6,9 +6,10 @@
+
+ from __future__ import annotations
+
++from functools import reduce
++
+ import torch
+ import torch.nn as nn
+-from functools import reduce
+
+ from rsl_rl.utils import get_param, resolve_nn_activation
+
+@@ -31,6 +32,7 @@ class MLP(nn.Sequential):
+         hidden_dims: tuple[int, ...] | list[int],
+         activation: str = "elu",
+         last_activation: str | None = None,
++        dropout_rate: float = 0.0,
+     ) -> None:
+         """Initialize the MLP.
+
+@@ -54,10 +56,14 @@ class MLP(nn.Sequential):
+         layers = []
+         layers.append(nn.Linear(input_dim, hidden_dims_processed[0]))
+         layers.append(activation_mod)
++        if dropout_rate > 0.0:
++            layers.append(nn.Dropout(dropout_rate))
+
+         for layer_index in range(len(hidden_dims_processed) - 1):
+             layers.append(nn.Linear(hidden_dims_processed[layer_index], hidden_dims_processed[layer_index + 1]))
+             layers.append(activation_mod)
++            if dropout_rate > 0.0:
++                layers.append(nn.Dropout(dropout_rate))
+
+         # Add last layer
+         if isinstance(output_dim, int):
+diff --git a/rsl_rl/modules/normalization.py b/rsl_rl/modules/normalization.py
+index d52487d..34c1c62 100644
+--- a/rsl_rl/modules/normalization.py
++++ b/rsl_rl/modules/normalization.py
+@@ -8,6 +8,8 @@
+
+ from __future__ import annotations
+
++import math
++
+ import torch
+ from torch import nn
+
+@@ -107,6 +109,78 @@ class EmpiricalDiscountedVariationNormalization(nn.Module):
+             return rew
+
+
++class ReturnVarianceNormalization(nn.Module):
++    """Normalize rewards to target unit-variance returns using EMA statistics."""
++
++    def __init__(
++        self,
++        shape: int | tuple[int, ...] | list[int],
++        eps: float = 1e-2,
++        gamma: float = 0.99,
++        decay: float = 0.999,
++        return_scale_decay: float | None = 0.999,
++        outlier_threshold: float | None = 10.0,
++    ) -> None:
++        """Initialize the return-variance reward normalizer."""
++        super().__init__()
++        self.eps = eps
++        self.gamma = gamma
++        self.decay = decay
++        self.gamma_factor = 1.0 / math.sqrt(1 - gamma**2)
++        self.return_scale_decay = return_scale_decay
++        self.outlier_threshold = outlier_threshold
++
++        self.register_buffer("_var", torch.ones(1))
++        self.register_buffer("_std", torch.ones(1))
++        self.register_buffer("_mean", torch.zeros(1))
++        self.register_buffer("_return_correction", torch.ones(1))
++
++    def forward(self, rew: torch.Tensor) -> torch.Tensor:
++        """Normalize rewards using reward variance and measured return scale."""
++        if self.training:
++            self.update(rew)
++
++        scale = self._std * self.gamma_factor * self._return_correction + self.eps
++        normalized = rew / scale
++
++        if self.outlier_threshold is not None:
++            normalized_mean = self._mean / scale
++            normalized = torch.clamp(
++                normalized,
++                normalized_mean - self.outlier_threshold,
++                normalized_mean + self.outlier_threshold,
++            )
++
++        return normalized
++
++    @torch.jit.unused
++    def update(self, rew: torch.Tensor) -> None:
++        """Update reward mean and variance statistics."""
++        if self.outlier_threshold is not None:
++            lower = self._mean - self.outlier_threshold * (self._std + self.eps)
++            upper = self._mean + self.outlier_threshold * (self._std + self.eps)
++            rew = torch.clamp(rew, lower, upper)
++
++        var_x = torch.var(rew, unbiased=False)
++        mean_x = torch.mean(rew)
++
++        alpha = 1.0 - self.decay
++        self._mean = self.decay * self._mean + alpha * mean_x
++        self._var = self.decay * self._var + alpha * var_x
++        self._std = torch.sqrt(self._var)
++
++    @torch.jit.unused
++    def update_return_scale(self, returns: torch.Tensor) -> None:
++        """Update temporal-correlation correction from measured rollout returns."""
++        if self.return_scale_decay is None:
++            return
++
++        return_std = returns.std().clamp(min=1e-6)
++        ideal_correction = return_std * self._return_correction
++        alpha = 1.0 - self.return_scale_decay
++        self._return_correction = self.return_scale_decay * self._return_correction + alpha * ideal_correction
++
++
+ class _DiscountedAverage:
+     r"""Discounted average of rewards.
+
+diff --git a/rsl_rl/runners/on_policy_runner.py b/rsl_rl/runners/on_policy_runner.py
+index 2ce9fda..1a712d9 100644
+--- a/rsl_rl/runners/on_policy_runner.py
++++ b/rsl_rl/runners/on_policy_runner.py
+@@ -7,7 +7,9 @@
+ from __future__ import annotations
+
+ import os
++import statistics
+ import time
++
+ import torch
+
+ from rsl_rl.algorithms import PPO
+@@ -52,6 +54,11 @@ class OnPolicyRunner:
+         )
+
+         self.current_learning_iteration = 0
++        self.init_entropy_coef = getattr(self.alg, "entropy_coef", 0.0)
++        self.success_episode_length_threshold = (
++            self.cfg.get("enable_entropy_coef_annealing_success_rate", 0.0) * self.env.max_episode_length
++        )
++        self.mean_episode_length = 0.0
+
+     def learn(self, num_learning_iterations: int, init_at_random_ep_len: bool = False) -> None:
+         """Run the learning loop for the specified number of iterations."""
+@@ -77,6 +84,9 @@ class OnPolicyRunner:
+         start_it = self.current_learning_iteration
+         total_it = start_it + num_learning_iterations
+         for it in range(start_it, total_it):
++            if hasattr(self.alg, "entropy_coef"):
++                self.mean_episode_length = statistics.mean(self.logger.lenbuffer) if self.logger.lenbuffer else 0.0
++                self._anneal_entropy_coef((it - start_it) / max(1, num_learning_iterations))
+             start = time.time()
+             # Rollout
+             with torch.inference_mode():
+@@ -122,6 +132,7 @@ class OnPolicyRunner:
+                 learning_rate=self.alg.learning_rate,
+                 action_std=self.alg.get_policy().output_std,
+                 rnd_weight=self.alg.rnd.weight if self.cfg["algorithm"]["rnd_cfg"] else None,
++                entropy_coef=getattr(self.alg, "entropy_coef", None),
+             )
+
+             # Save model
+@@ -165,6 +176,22 @@ class OnPolicyRunner:
+         self.alg.eval_mode()  # Switch to evaluation mode (e.g. for dropout)
+         return self.alg.get_policy().to(device)  # type: ignore
+
++    def _anneal_entropy_coef(self, progress: float) -> None:
++        """Anneal entropy once episodes are consistently long enough."""
++        if not self.cfg.get("enable_entropy_coef_annealing", False):
++            return
++        if self.mean_episode_length <= self.success_episode_length_threshold:
++            return
++        if progress <= self.cfg["entropy_coef_annealing_start_progress"]:
++            return
++
++        decay_rate = self.cfg.get("entropy_annealing_decay_rate")
++        if decay_rate is not None:
++            self.alg.entropy_coef *= decay_rate
++        else:
++            self.alg.entropy_coef = self.init_entropy_coef * (1 - progress)
++        self.alg.entropy_coef = max(self.alg.entropy_coef, self.cfg.get("min_entropy_coef", 0.0))
++
+     def export_policy_to_jit(self, path: str, filename: str = "policy.pt") -> None:
+         """Export the model to a Torch JIT file."""
+         jit_model = self.alg.get_policy().as_jit()
+diff --git a/rsl_rl/storage/rollout_storage.py b/rsl_rl/storage/rollout_storage.py
+index cf7ec4f..3329cd8 100644
+--- a/rsl_rl/storage/rollout_storage.py
++++ b/rsl_rl/storage/rollout_storage.py
+@@ -6,8 +6,9 @@
+
+ from __future__ import annotations
+
+-import torch
+ from collections.abc import Generator
++
++import torch
+ from tensordict import TensorDict
+
+ from rsl_rl.modules import HiddenState
+@@ -84,6 +85,7 @@ class RolloutStorage:
+             masks: torch.Tensor | None = None,
+             privileged_actions: torch.Tensor | None = None,
+             dones: torch.Tensor | None = None,
++            l2c2_batch: tuple[TensorDict, TensorDict, torch.Tensor] | None = None,
+         ) -> None:
+             """Initialize a batch container over rollout data."""
+             self.observations: TensorDict | None = observations
+@@ -122,6 +124,9 @@ class RolloutStorage:
+             self.masks: torch.Tensor | None = masks
+             """Batch of trajectory masks for recurrent networks (RL recurrent only)."""
+
++            self.l2c2_batch: tuple[TensorDict, TensorDict, torch.Tensor] | None = l2c2_batch
++            """Batch of adjacent observations and done mask for L2C2 regularization."""
++
+     def __init__(
+         self,
+         training_type: str,
+@@ -130,6 +135,7 @@ class RolloutStorage:
+         obs: TensorDict,
+         actions_shape: tuple[int, ...] | list[int],
+         device: str = "cpu",
++        use_l2c2: bool = False,
+     ) -> None:
+         """Allocate rollout buffers for a specific training mode and batch shape."""
+         self.training_type = training_type
+@@ -137,6 +143,7 @@ class RolloutStorage:
+         self.num_transitions_per_env = num_transitions_per_env
+         self.num_envs = num_envs
+         self.actions_shape = actions_shape
++        self.use_l2c2 = use_l2c2
+
+         # Core
+         self.observations = TensorDict(
+@@ -239,12 +246,31 @@ class RolloutStorage:
+         advantages = self.advantages.flatten(0, 1)
+         old_distribution_params = tuple(p.flatten(0, 1) for p in self.distribution_params)  # type: ignore
+
+-        for epoch in range(num_epochs):
++        if self.use_l2c2:
++            prev_observations = self.observations[:-1].flatten(0, 1)
++            next_observations = self.observations[1:].flatten(0, 1)
++            done_mask = self.dones[:-1].squeeze(-1).bool().flatten(0, 1)
++            l2c2_batch_size = self.num_envs * (self.num_transitions_per_env - 1)
++            l2c2_mini_batch_size = l2c2_batch_size // num_mini_batches
++            l2c2_indices = torch.randperm(l2c2_batch_size, requires_grad=False, device=self.device)
++
++        for _epoch in range(num_epochs):
+             for i in range(num_mini_batches):
+                 # Select the indices for the mini-batch
+                 start = i * mini_batch_size
+                 stop = (i + 1) * mini_batch_size
+                 batch_idx = indices[start:stop]
++                if self.use_l2c2:
++                    l2c2_start = i * l2c2_mini_batch_size
++                    l2c2_stop = (i + 1) * l2c2_mini_batch_size
++                    l2c2_batch_idx = l2c2_indices[l2c2_start:l2c2_stop]
++                    l2c2_batch = (
++                        prev_observations[l2c2_batch_idx],
++                        next_observations[l2c2_batch_idx],
++                        done_mask[l2c2_batch_idx],
++                    )
++                else:
++                    l2c2_batch = None
+
+                 # Yield the mini-batch
+                 yield RolloutStorage.Batch(
+@@ -255,6 +281,7 @@ class RolloutStorage:
+                     returns=returns[batch_idx],
+                     old_actions_log_prob=old_actions_log_prob[batch_idx],
+                     old_distribution_params=tuple(p[batch_idx] for p in old_distribution_params),
++                    l2c2_batch=l2c2_batch,
+                 )
+
+     # For reinforcement learning with recurrent networks
+@@ -264,10 +291,12 @@ class RolloutStorage:
+         """Yield trajectory mini-batches with masks and recurrent hidden states."""
+         if self.training_type != "rl":
+             raise ValueError("This function is only available for reinforcement learning training.")
++        if self.use_l2c2:
++            raise NotImplementedError("L2C2 regularization is not implemented for recurrent mini-batches.")
+         padded_obs_trajectories, trajectory_masks = split_and_pad_trajectories(self.observations, self.dones)
+         mini_batch_size = self.num_envs // num_mini_batches
+
+-        for ep in range(num_epochs):
++        for _ep in range(num_epochs):
+             first_traj = 0
+             for i in range(num_mini_batches):
+                 # Select the indices for the mini-batch
+diff --git a/rsl_rl/utils/logger.py b/rsl_rl/utils/logger.py
+index 93af3c5..5fe0bf2 100644
+--- a/rsl_rl/utils/logger.py
++++ b/rsl_rl/utils/logger.py
+@@ -7,14 +7,15 @@
+ from __future__ import annotations
+
+ import datetime
+-import git
+ import os
+ import pathlib
+ import statistics
+-import torch
+ import warnings
+ from collections import deque
+
++import git
++import torch
++
+ import rsl_rl
+ from rsl_rl.utils.log_writer import LogWriter
+ from rsl_rl.utils.utils import resolve_callable
+@@ -164,6 +165,7 @@ class Logger:
+         learning_rate: float,
+         action_std: torch.Tensor,
+         rnd_weight: float | None,
++        entropy_coef: float | None = None,
+         print_minimal: bool = False,
+         width: int = 80,
+         pad: int = 40,
+@@ -209,6 +211,8 @@ class Logger:
+
+             # Log std
+             self.writer.add_scalar("Policy/mean_std", action_std.mean().item(), it)
++            if entropy_coef is not None:
++                self.writer.add_scalar("Train/entropy_coef", entropy_coef, it)
+
+             # Log performance
+             fps = int(collection_size / (collect_time + learn_time))
+@@ -262,6 +266,8 @@ class Logger:
+
+             # Print std
+             log_string += f"""{"Mean action std:":>{pad}} {action_std.mean().item():.2f}\n"""
++            if entropy_coef is not None:
++                log_string += f"""{"Entropy coefficient:":>{pad}} {entropy_coef:.6f}\n"""
+
+             # Print episode extras
+             if not print_minimal:

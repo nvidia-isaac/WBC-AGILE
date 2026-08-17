@@ -1,0 +1,408 @@
+models:
+  Velocity-T1-v0:
+    inputs:
+      - name: robot_root_ang_vel_b
+        dtype: float32
+        shape:
+          - 1
+          - 3
+        type: tensor
+        kind: state/body/angular_velocity
+        element_names:
+          - - x
+            - y
+            - z
+        isaaclab_connection: state:robot:root_ang_vel_b
+      - name: h_policy_base_ang_vel_in
+        dtype: float32
+        shape:
+          - 5
+          - 1
+          - 3
+        type: tensor
+      - name: robot_root_quat_w
+        dtype: float32
+        shape:
+          - 1
+          - 4
+        type: tensor
+        kind: state/body/rotation
+        element_names:
+          - - qx
+            - qy
+            - qz
+            - qw
+        isaaclab_connection: state:robot:root_quat_w
+      - name: h_policy_projected_gravity_in
+        dtype: float32
+        shape:
+          - 5
+          - 1
+          - 3
+        type: tensor
+      - name: base_velocity
+        dtype: float32
+        shape:
+          - 1
+          - 3
+        type: tensor
+        kind: command/body/velocity
+        element_names:
+          - - lin_vel_x
+            - lin_vel_y
+            - ang_vel_z
+        isaaclab_connection: command:base_velocity
+      - name: h_policy_velocity_commands_in
+        dtype: float32
+        shape:
+          - 5
+          - 1
+          - 3
+        type: tensor
+      - name: robot_joint_pos
+        dtype: float32
+        shape:
+          - 1
+          - 23
+        type: tensor
+        kind: state/joint/position
+        element_names:
+          - - AAHead_yaw
+            - Left_Shoulder_Pitch
+            - Right_Shoulder_Pitch
+            - Waist
+            - Head_pitch
+            - Left_Shoulder_Roll
+            - Right_Shoulder_Roll
+            - Left_Hip_Pitch
+            - Right_Hip_Pitch
+            - Left_Elbow_Pitch
+            - Right_Elbow_Pitch
+            - Left_Hip_Roll
+            - Right_Hip_Roll
+            - Left_Elbow_Yaw
+            - Right_Elbow_Yaw
+            - Left_Hip_Yaw
+            - Right_Hip_Yaw
+            - Left_Knee_Pitch
+            - Right_Knee_Pitch
+            - Left_Ankle_Pitch
+            - Right_Ankle_Pitch
+            - Left_Ankle_Roll
+            - Right_Ankle_Roll
+        isaaclab_connection: state:robot:joint_pos
+      - name: h_policy_controlled_joint_pos_in
+        dtype: float32
+        shape:
+          - 5
+          - 1
+          - 12
+        type: tensor
+      - name: robot_joint_vel
+        dtype: float32
+        shape:
+          - 1
+          - 23
+        type: tensor
+        kind: state/joint/velocity
+        element_names:
+          - - AAHead_yaw
+            - Left_Shoulder_Pitch
+            - Right_Shoulder_Pitch
+            - Waist
+            - Head_pitch
+            - Left_Shoulder_Roll
+            - Right_Shoulder_Roll
+            - Left_Hip_Pitch
+            - Right_Hip_Pitch
+            - Left_Elbow_Pitch
+            - Right_Elbow_Pitch
+            - Left_Hip_Roll
+            - Right_Hip_Roll
+            - Left_Elbow_Yaw
+            - Right_Elbow_Yaw
+            - Left_Hip_Yaw
+            - Right_Hip_Yaw
+            - Left_Knee_Pitch
+            - Right_Knee_Pitch
+            - Left_Ankle_Pitch
+            - Right_Ankle_Pitch
+            - Left_Ankle_Roll
+            - Right_Ankle_Roll
+        isaaclab_connection: state:robot:joint_vel
+      - name: h_policy_controlled_joint_vel_in
+        dtype: float32
+        shape:
+          - 5
+          - 1
+          - 12
+        type: tensor
+      - name: last_action_in
+        dtype: float32
+        shape:
+          - 1
+          - 12
+        type: tensor
+      - name: h_policy_actions_in
+        dtype: float32
+        shape:
+          - 5
+          - 1
+          - 12
+        type: tensor
+    outputs:
+      - name: joint_pos
+        dtype: float32
+        shape:
+          - 1
+          - 12
+        type: tensor
+        kind: target/joint/position
+        element_names:
+          - - Left_Hip_Pitch
+            - Right_Hip_Pitch
+            - Left_Hip_Roll
+            - Right_Hip_Roll
+            - Left_Hip_Yaw
+            - Right_Hip_Yaw
+            - Left_Knee_Pitch
+            - Right_Knee_Pitch
+            - Left_Ankle_Pitch
+            - Right_Ankle_Pitch
+            - Left_Ankle_Roll
+            - Right_Ankle_Roll
+        isaaclab_connection: write:robot:set_joint_position_target_index
+      - name: h_policy_base_ang_vel_out
+        dtype: float32
+        shape:
+          - 5
+          - 1
+          - 3
+        type: tensor
+      - name: h_policy_projected_gravity_out
+        dtype: float32
+        shape:
+          - 5
+          - 1
+          - 3
+        type: tensor
+      - name: h_policy_velocity_commands_out
+        dtype: float32
+        shape:
+          - 5
+          - 1
+          - 3
+        type: tensor
+      - name: h_policy_controlled_joint_pos_out
+        dtype: float32
+        shape:
+          - 5
+          - 1
+          - 12
+        type: tensor
+      - name: h_policy_controlled_joint_vel_out
+        dtype: float32
+        shape:
+          - 5
+          - 1
+          - 12
+        type: tensor
+      - name: last_action_out
+        dtype: float32
+        shape:
+          - 1
+          - 12
+        type: tensor
+      - name: h_policy_actions_out
+        dtype: float32
+        shape:
+          - 5
+          - 1
+          - 12
+        type: tensor
+      - name: joint_pos_kp_gains
+        dtype: float32
+        shape:
+          - 1
+          - 12
+        type: tensor
+        kind: kp
+        element_names:
+          - - Left_Hip_Pitch
+            - Right_Hip_Pitch
+            - Left_Hip_Roll
+            - Right_Hip_Roll
+            - Left_Hip_Yaw
+            - Right_Hip_Yaw
+            - Left_Knee_Pitch
+            - Right_Knee_Pitch
+            - Left_Ankle_Pitch
+            - Right_Ankle_Pitch
+            - Left_Ankle_Roll
+            - Right_Ankle_Roll
+        isaaclab_connection: write:robot:write_joint_stiffness_to_sim_index
+      - name: joint_pos_kd_gains
+        dtype: float32
+        shape:
+          - 1
+          - 12
+        type: tensor
+        kind: kd
+        element_names:
+          - - Left_Hip_Pitch
+            - Right_Hip_Pitch
+            - Left_Hip_Roll
+            - Right_Hip_Roll
+            - Left_Hip_Yaw
+            - Right_Hip_Yaw
+            - Left_Knee_Pitch
+            - Right_Knee_Pitch
+            - Left_Ankle_Pitch
+            - Right_Ankle_Pitch
+            - Left_Ankle_Roll
+            - Right_Ankle_Roll
+        isaaclab_connection: write:robot:write_joint_damping_to_sim_index
+    parameters:
+      model_path: Velocity-T1-v0.onnx
+      md5sum: 8a0814fa853c5c352b0bd64dbccdc77d
+      sha256sum: 00d411b9b70a0c9288db49076be6813a1db4c7d86fae682b177d035e039e2c9d
+      backend: onnx
+      opset_version: 20
+pipeline:
+  data_flow: {}
+  feedback_flow:
+    Velocity-T1-v0/h_policy_actions_out:
+      - Velocity-T1-v0/h_policy_actions_in
+    Velocity-T1-v0/h_policy_base_ang_vel_out:
+      - Velocity-T1-v0/h_policy_base_ang_vel_in
+    Velocity-T1-v0/h_policy_controlled_joint_pos_out:
+      - Velocity-T1-v0/h_policy_controlled_joint_pos_in
+    Velocity-T1-v0/h_policy_controlled_joint_vel_out:
+      - Velocity-T1-v0/h_policy_controlled_joint_vel_in
+    Velocity-T1-v0/h_policy_projected_gravity_out:
+      - Velocity-T1-v0/h_policy_projected_gravity_in
+    Velocity-T1-v0/h_policy_velocity_commands_out:
+      - Velocity-T1-v0/h_policy_velocity_commands_in
+    Velocity-T1-v0/last_action_out:
+      - Velocity-T1-v0/last_action_in
+  initial_values: Velocity-T1-v0_initial_values.safetensors
+  inputs:
+    Velocity-T1-v0:
+      - robot_root_ang_vel_b
+      - robot_root_quat_w
+      - base_velocity
+      - robot_joint_pos
+      - robot_joint_vel
+  outputs:
+    Velocity-T1-v0:
+      - joint_pos
+      - joint_pos_kp_gains
+      - joint_pos_kd_gains
+  configs:
+    frequency: 50.0
+system information:
+  cuda version: '12.8'
+  leapp config version: '1.1'
+  leapp version: 0.5.2
+  os: Ubuntu 24.04
+  python version: 3.12.12
+  torch version: 2.11.0+cu128
+agile:
+  articulations:
+    robot:
+      joint_names:
+        - AAHead_yaw
+        - Left_Shoulder_Pitch
+        - Right_Shoulder_Pitch
+        - Waist
+        - Head_pitch
+        - Left_Shoulder_Roll
+        - Right_Shoulder_Roll
+        - Left_Hip_Pitch
+        - Right_Hip_Pitch
+        - Left_Elbow_Pitch
+        - Right_Elbow_Pitch
+        - Left_Hip_Roll
+        - Right_Hip_Roll
+        - Left_Elbow_Yaw
+        - Right_Elbow_Yaw
+        - Left_Hip_Yaw
+        - Right_Hip_Yaw
+        - Left_Knee_Pitch
+        - Right_Knee_Pitch
+        - Left_Ankle_Pitch
+        - Right_Ankle_Pitch
+        - Left_Ankle_Roll
+        - Right_Ankle_Roll
+      default_joint_pos:
+        - 0.0
+        - 0.0
+        - 0.0
+        - 0.0
+        - 0.0
+        - -1.2999999523162842
+        - 1.2999999523162842
+        - -0.20000000298023224
+        - -0.20000000298023224
+        - 0.0
+        - 0.0
+        - 0.0
+        - 0.0
+        - -0.30000001192092896
+        - 0.30000001192092896
+        - 0.0
+        - 0.0
+        - 0.4000000059604645
+        - 0.4000000059604645
+        - -0.20000000298023224
+        - -0.20000000298023224
+        - 0.0
+        - 0.0
+      default_joint_stiffness:
+        - 20.0
+        - 20.0
+        - 20.0
+        - 100.0
+        - 20.0
+        - 20.0
+        - 20.0
+        - 100.0
+        - 100.0
+        - 20.0
+        - 20.0
+        - 100.0
+        - 100.0
+        - 20.0
+        - 20.0
+        - 100.0
+        - 100.0
+        - 100.0
+        - 100.0
+        - 20.0
+        - 20.0
+        - 20.0
+        - 20.0
+      default_joint_damping:
+        - 0.20000000298023224
+        - 0.5
+        - 0.5
+        - 2.5
+        - 0.20000000298023224
+        - 0.5
+        - 0.5
+        - 2.5
+        - 2.5
+        - 0.5
+        - 0.5
+        - 2.5
+        - 2.5
+        - 0.5
+        - 0.5
+        - 2.5
+        - 2.5
+        - 2.5
+        - 2.5
+        - 1.0
+        - 1.0
+        - 1.0
+        - 1.0

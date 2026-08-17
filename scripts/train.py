@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 # SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 #
@@ -74,8 +76,7 @@ import gymnasium as gym
 import os
 import torch
 from datetime import datetime
-
-from rsl_rl.runners import OnPolicyRunner
+from pathlib import Path
 
 from isaaclab.envs import (
     DirectMARLEnv,
@@ -90,6 +91,7 @@ from isaaclab_tasks.utils import get_checkpoint_path
 from isaaclab_tasks.utils.hydra import hydra_task_config
 
 import agile.isaaclab_extras.monkey_patches
+from agile.isaaclab_extras.record_video import EfficientRecordVideo
 
 # PLACEHOLDER: Extension template (do not remove this comment)
 import agile.rl_env.tasks  # noqa: F401
@@ -97,6 +99,8 @@ import agile.rl_env.tasks  # noqa: F401
 from agile.rl_env.rsl_rl import (  # isort: skip
     RslRlOnPolicyRunnerCfg,
     RslRlVecEnvWrapper,
+    make_rsl_rl_load_cfg,
+    make_rsl_rl_runner,
 )
 
 torch.backends.cuda.matmul.allow_tf32 = True
@@ -176,7 +180,7 @@ def main(
         }
         print("[INFO] Recording videos during training.")
         print_dict(video_kwargs, nesting=4)
-        env = gym.wrappers.RecordVideo(env, **video_kwargs)
+        env = EfficientRecordVideo(env, app_launcher=app_launcher, **video_kwargs)
 
     # Call pre_learn hook if the task provides one
     pre_learn_entry_point = gym.spec(args_cli.task).kwargs.get("pre_learn_entry_point")
@@ -192,19 +196,14 @@ def main(
     env = RslRlVecEnvWrapper(env, clip_actions=agent_cfg.clip_actions)
 
     # create runner from rsl-rl
-    runner = OnPolicyRunner(
-        env,
-        agent_cfg.to_dict(),
-        log_dir=log_dir,
-        device=agent_cfg.device,
-    )
+    runner = make_rsl_rl_runner(env, agent_cfg, log_dir=log_dir, device=agent_cfg.device)
     # write git state to logs
     runner.add_git_repo_to_log(__file__)
     # load the checkpoint
     if agent_cfg.resume:
         print(f"[INFO]: Loading model checkpoint from: {resume_path}")
         # load previously trained model
-        runner.load(resume_path, load_optimizer=agent_cfg.load_optimizer)
+        runner.load(resume_path, load_cfg=make_rsl_rl_load_cfg(agent_cfg))
 
     # dump the configuration into log-directory
     dump_yaml(os.path.join(log_dir, "params", "env.yaml"), env_cfg)

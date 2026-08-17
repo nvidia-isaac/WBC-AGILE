@@ -17,7 +17,7 @@
 from __future__ import annotations
 
 from isaaclab.actuators import DCMotorCfg, ImplicitActuatorCfg
-from isaaclab.utils import configclass
+from isaaclab.utils.configclass import configclass
 
 from agile.rl_env.mdp.actuators.actuators import DelayedDCMotor, DelayedImplicitActuator
 

@@ -13,6 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# ruff: noqa: I001
 
 import copy as _copy
 
@@ -307,7 +308,7 @@ G1_29DOF = ArticulationCfg(
         joint_vel={".*": 0.0},
     ),
     actuators={
-        "legs": DelayedImplicitActuatorCfg(
+        "legs": DelayedDCMotorCfg(
             joint_names_expr=[
                 ".*_hip_yaw_joint",
                 ".*_hip_roll_joint",
@@ -321,22 +322,22 @@ G1_29DOF = ArticulationCfg(
                 ".*_knee_joint": 139.0,
             },
             velocity_limit_sim={
-                ".*_hip_yaw_joint": 32.0,
-                ".*_hip_roll_joint": 20.0,
-                ".*_hip_pitch_joint": 32.0,
-                ".*_knee_joint": 20.0,
+                ".*_hip_yaw_joint": 10.0,
+                ".*_hip_roll_joint": 10.0,
+                ".*_hip_pitch_joint": 10.0,
+                ".*_knee_joint": 10.0,
             },
             stiffness={
-                ".*_hip_pitch_joint": STIFFNESS_7520_14,
-                ".*_hip_roll_joint": STIFFNESS_7520_22,
-                ".*_hip_yaw_joint": STIFFNESS_7520_14,
-                ".*_knee_joint": STIFFNESS_7520_22,
+                ".*_hip_pitch_joint": 100.0,
+                ".*_hip_roll_joint": 100.0,
+                ".*_hip_yaw_joint": 100.0,
+                ".*_knee_joint": 200.0,
             },
             damping={
-                ".*_hip_pitch_joint": DAMPING_7520_14,
-                ".*_hip_roll_joint": DAMPING_7520_22,
-                ".*_hip_yaw_joint": DAMPING_7520_14,
-                ".*_knee_joint": DAMPING_7520_22,
+                ".*_hip_pitch_joint": 2.5,
+                ".*_hip_roll_joint": 2.5,
+                ".*_hip_yaw_joint": 2.5,
+                ".*_knee_joint": 5.0,
             },
             armature={
                 ".*_hip_pitch_joint": ARMATURE_7520_14,
@@ -344,20 +345,28 @@ G1_29DOF = ArticulationCfg(
                 ".*_hip_yaw_joint": ARMATURE_7520_14,
                 ".*_knee_joint": ARMATURE_7520_22,
             },
+            saturation_effort=180.0,
             min_delay=MIN_DELAY_PHY_STEPS,
             max_delay=MAX_DELAY_PHY_STEPS,
         ),
-        "feet": DelayedImplicitActuatorCfg(
+        "feet": DelayedDCMotorCfg(
             effort_limit_sim=50.0,
             velocity_limit_sim=10.0,
             joint_names_expr=ANKLE_JOINT_NAMES,
-            stiffness=2.0 * STIFFNESS_5020,
-            damping=2.0 * DAMPING_5020,
+            stiffness={
+                ".*_ankle_pitch_joint": 20.0,
+                ".*_ankle_roll_joint": 20.0,
+            },
+            damping={
+                ".*_ankle_pitch_joint": 0.2,
+                ".*_ankle_roll_joint": 0.1,
+            },
             armature=2.0 * ARMATURE_5020,
+            saturation_effort=80.0,
             min_delay=MIN_DELAY_PHY_STEPS,
             max_delay=MAX_DELAY_PHY_STEPS,
         ),
-        "waist": ImplicitActuatorCfg(
+        "waist": DelayedDCMotorCfg(
             joint_names_expr=WAIST_JOINT_NAMES,
             effort_limit_sim={
                 "waist_yaw_joint": 88.0,
@@ -380,8 +389,11 @@ G1_29DOF = ArticulationCfg(
                 "waist_pitch_joint": 5.0,
             },
             armature=0.03,
+            saturation_effort=120.0,
+            min_delay=MIN_DELAY_PHY_STEPS,
+            max_delay=MAX_DELAY_PHY_STEPS,
         ),
-        "arms": ImplicitActuatorCfg(
+        "arms": DelayedDCMotorCfg(
             joint_names_expr=ARM_JOINT_NAMES,
             effort_limit_sim={
                 ".*_shoulder_pitch_joint": 25.0,
@@ -420,6 +432,9 @@ G1_29DOF = ArticulationCfg(
                 ".*_elbow_.*": 0.03,
                 ".*_wrist_.*_joint": 0.03,
             },
+            saturation_effort=40.0,
+            min_delay=MIN_DELAY_PHY_STEPS,
+            max_delay=MAX_DELAY_PHY_STEPS,
         ),
     },
 )
@@ -651,7 +666,7 @@ G1_W_HANDS_AGILE_CFG = ArticulationCfg(
         joint_vel={".*": 0.0},
     ),
     actuators={
-        "legs": DelayedImplicitActuatorCfg(
+        "legs": DelayedDCMotorCfg(
             joint_names_expr=[
                 ".*_hip_yaw_joint",
                 ".*_hip_roll_joint",
@@ -688,20 +703,22 @@ G1_W_HANDS_AGILE_CFG = ArticulationCfg(
                 ".*_hip_yaw_joint": ARMATURE_7520_14,
                 ".*_knee_joint": ARMATURE_7520_22,
             },
-            min_delay=0,
-            max_delay=0,
+            saturation_effort=180.0,
+            min_delay=MIN_DELAY_PHY_STEPS,
+            max_delay=MAX_DELAY_PHY_STEPS,
         ),
-        "feet": DelayedImplicitActuatorCfg(
+        "feet": DelayedDCMotorCfg(
             effort_limit_sim=50.0,
             velocity_limit_sim=37.0,
             joint_names_expr=ANKLE_JOINT_NAMES,
             stiffness=2.0 * STIFFNESS_5020,
             damping=2.0 * DAMPING_5020,
             armature=2.0 * ARMATURE_5020,
-            min_delay=0,
-            max_delay=0,
+            saturation_effort=80.0,
+            min_delay=MIN_DELAY_PHY_STEPS,
+            max_delay=MAX_DELAY_PHY_STEPS,
         ),
-        "waist": DelayedImplicitActuatorCfg(
+        "waist": DelayedDCMotorCfg(
             joint_names_expr=WAIST_JOINT_NAMES,
             effort_limit_sim={
                 "waist_yaw_joint": 88.0,
@@ -724,10 +741,11 @@ G1_W_HANDS_AGILE_CFG = ArticulationCfg(
                 "waist_pitch_joint": 5.0,
             },
             armature=0.03,
-            min_delay=0,
-            max_delay=0,
+            saturation_effort=120.0,
+            min_delay=MIN_DELAY_PHY_STEPS,
+            max_delay=MAX_DELAY_PHY_STEPS,
         ),
-        "left_arms": DelayedImplicitActuatorCfg(
+        "left_arms": DelayedDCMotorCfg(
             joint_names_expr=[
                 "left_shoulder_pitch_joint",
                 "left_shoulder_roll_joint",
@@ -780,10 +798,11 @@ G1_W_HANDS_AGILE_CFG = ArticulationCfg(
                 "left_wrist_pitch_joint": 0.03,
                 "left_wrist_yaw_joint": 0.03,
             },
-            min_delay=0,
-            max_delay=0,
+            saturation_effort=40.0,
+            min_delay=MIN_DELAY_PHY_STEPS,
+            max_delay=MAX_DELAY_PHY_STEPS,
         ),
-        "right_arms": DelayedImplicitActuatorCfg(
+        "right_arms": DelayedDCMotorCfg(
             joint_names_expr=[
                 "right_shoulder_pitch_joint",
                 "right_shoulder_roll_joint",
@@ -836,16 +855,18 @@ G1_W_HANDS_AGILE_CFG = ArticulationCfg(
                 "right_wrist_pitch_joint": 0.03,
                 "right_wrist_yaw_joint": 0.03,
             },
-            min_delay=0,
-            max_delay=0,
+            saturation_effort=40.0,
+            min_delay=MIN_DELAY_PHY_STEPS,
+            max_delay=MAX_DELAY_PHY_STEPS,
         ),
-        "hands": DelayedImplicitActuatorCfg(
+        "hands": DelayedDCMotorCfg(
             effort_limit_sim=EFFORT_LIMIT_1515,
             velocity_limit_sim=VELOCITY_LIMIT_1515,
             joint_names_expr=HAND_JOINT_NAMES,
             stiffness=STIFFNESS_1515,
             damping=DAMPING_1515,
             armature=ARMATURE_1515,
+            saturation_effort=EFFORT_LIMIT_1515,
             min_delay=0,
             max_delay=0,
         ),
@@ -867,9 +888,8 @@ for _a in G1_W_HANDS_AGILE_CFG.actuators.values():
 
 G1_NO_HANDS_AGILE_ACTION_SCALE = {k: v for k, v in G1_W_HANDS_AGILE_ACTION_SCALE.items() if "hand" not in k}
 
-
 # ---------------------------------------------------------------------------
-# G1 29-DOF config tuned for HeightTracking (stand-up / lie-down).
+# Height-tracking variant: softer gains for quasi-static sit/stand motions.
 # Derived from G1_29DOF_DELAYED_DC_MOTOR with lower stiffness/damping,
 # uniform saturation effort, and added joint friction.
 # ---------------------------------------------------------------------------

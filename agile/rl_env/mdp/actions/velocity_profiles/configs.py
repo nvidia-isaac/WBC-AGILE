@@ -21,7 +21,7 @@ from typing import Literal
 
 # Conditional import for Isaac Lab compatibility
 try:
-    from isaaclab.utils import configclass
+    from isaaclab.utils.configclass import configclass
 except ImportError:
     # Fallback to standard dataclass when Isaac Lab is not available
     from dataclasses import dataclass as configclass

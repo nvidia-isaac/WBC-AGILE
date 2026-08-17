@@ -22,6 +22,7 @@ Only requires: pandas, plotly, jinja2
 
 from __future__ import annotations
 
+import shutil
 import sys
 import webbrowser
 from pathlib import Path
@@ -47,6 +48,16 @@ except ImportError:
     from plotting import calculate_tracking_errors, load_episode, load_metadata
 
 
+def _video_embed_html(rel_src: str, label: str) -> str:
+    """An HTML block embedding an mp4 by relative path."""
+    return (
+        f'<div class="video-block"><h3>{label}</h3>'
+        f'<video controls width="640" preload="metadata">'
+        f'<source src="{rel_src}" type="video/mp4">'
+        f"Your browser does not support the video tag.</video></div>"
+    )
+
+
 class TrajectoryReportGenerator:
     """Generate interactive HTML reports from trajectory data.
 
@@ -59,6 +70,7 @@ class TrajectoryReportGenerator:
         trajectory_dir: str | Path,
         output_dir: str | Path | None = None,
         plot_backend: str = "plotly",
+        task_name: str | None = None,
     ):
         """Initialize report generator.
 
@@ -66,6 +78,7 @@ class TrajectoryReportGenerator:
             trajectory_dir: Directory containing trajectory parquet files and metadata.json
             output_dir: Where to save reports. Defaults to trajectory_dir/../reports
             plot_backend: 'plotly' for interactive or 'matplotlib' for static (plotly recommended)
+            task_name: Explicit task name for reports without trajectory metadata.
         """
         self.trajectory_dir = Path(trajectory_dir)
 
@@ -80,6 +93,7 @@ class TrajectoryReportGenerator:
             self.output_dir = Path(output_dir)
 
         self.plot_backend = plot_backend
+        self.task_name = task_name
 
         # Create output directories
         self.output_dir.mkdir(parents=True, exist_ok=True)
@@ -117,11 +131,22 @@ class TrajectoryReportGenerator:
                 continue
         return sorted(episode_ids)
 
+    def _report_task_name(self) -> str:
+        """Return the best available task name for the report title."""
+        return (
+            self.task_name
+            or self.metadata.get("task_name")
+            or (self.metadata.get("provenance") or {}).get("task")
+            or "Unknown Task"
+        )
+
     def generate_full_report(
         self,
         episode_ids: list[int] | str = "all",
         include_all_joints: bool = True,
         open_browser: bool = True,
+        eval_video: Path | None = None,
+        sim2sim_video: Path | None = None,
     ) -> Path:
         """Generate complete HTML report with index and episode pages.
 
@@ -133,6 +158,8 @@ class TrajectoryReportGenerator:
                         - list of ints: Specific episodes
             include_all_joints: Whether to include all joints or just key joints
             open_browser: Whether to automatically open the report in browser
+            eval_video: Optional path to an Isaac Lab eval rollout mp4 to embed.
+            sim2sim_video: Optional path to a Sim2MuJoCo rollout mp4 to embed.
 
         Returns:
             Path to the generated index.html file
@@ -153,9 +180,24 @@ class TrajectoryReportGenerator:
             ep_summary = self.generate_episode_page(ep_id, include_all_joints=include_all_joints)
             episode_summaries.append(ep_summary)
 
+        # Copy any provided videos into output_dir/videos/ and build embed HTML
+        videos_html = ""
+        videos_dir = self.output_dir / "videos"
+        for src, label in [(eval_video, "Evaluation (Isaac Lab)"), (sim2sim_video, "Sim2MuJoCo")]:
+            if src is None:
+                continue
+            src = Path(src)
+            if not src.is_file():
+                print(f"[WARN] video not found, skipping embed: {src}")
+                continue
+            videos_dir.mkdir(parents=True, exist_ok=True)
+            dst = videos_dir / src.name
+            shutil.copy2(src, dst)
+            videos_html += _video_embed_html(f"videos/{src.name}", label)
+
         # Generate index page
         print("Generating index page...")
-        index_path = self.generate_index_page(episode_summaries)
+        index_path = self.generate_index_page(episode_summaries, videos_html=videos_html)
 
         print("\n✓ Report generated successfully!")
         print(f"  Location: {index_path}")
@@ -192,11 +234,12 @@ class TrajectoryReportGenerator:
 
         return filtered
 
-    def generate_index_page(self, episode_summaries: list[dict]) -> Path:
+    def generate_index_page(self, episode_summaries: list[dict], videos_html: str = "") -> Path:
         """Generate main summary index.html page.
 
         Args:
             episode_summaries: List of episode summary dictionaries
+            videos_html: Pre-built HTML string with embedded video blocks (may be empty).
 
         Returns:
             Path to generated index.html
@@ -211,12 +254,13 @@ class TrajectoryReportGenerator:
 
         # Render HTML
         html_content = self._render_index_template(
-            task_name=self.metadata.get("task_name", "Unknown Task"),
+            task_name=self._report_task_name(),
             total_episodes=total_episodes,
             successful_episodes=successful,
             success_rate=success_rate,
             episodes=episode_summaries,
             summary_plot=summary_plot_html,
+            videos_html=videos_html,
         )
 
         # Save to file
@@ -752,6 +796,8 @@ INDEX_HTML_TEMPLATE = """
         <h1>📊 Evaluation Report: {{task_name}}</h1>
         <p>Trajectory Analysis Dashboard</p>
     </div>
+
+    {{videos_html|safe}}
 
     <div class="metrics-grid">
         <div class="metric-card">

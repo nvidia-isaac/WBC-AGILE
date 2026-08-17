@@ -90,6 +90,7 @@ the pick & place task freezes a trained locomotion policy and layers upper-body 
 |---------|-------|-------------------|----------|--------------|
 | `Velocity-T1-v0` | Booster T1 | Legs (12 joints) | Velocity (x, y, yaw) | History (5 steps) |
 | `Velocity-G1-History-v0` | Unitree G1 | Legs + Waist Roll/Pitch (14 joints) | Velocity (x, y, yaw) | History (5 steps) |
+| `Velocity-G1-Teacher-v0` | Unitree G1 | Legs + Waist Roll/Pitch (14 joints) | Velocity (x, y, yaw) | Privileged teacher observations |
 
 Both robots use the **Delayed DC Motor** actuator model, which adds realistic communication
 delay between the policy output and joint actuation.
@@ -124,9 +125,10 @@ sim-to-real transfer:
 
 | Task ID | Robot | Policy Type | Commands | Actuator Model |
 |---------|-------|-------------|----------|----------------|
-| `Velocity-Height-G1-v0` | Unitree G1 | Teacher (privileged) | Velocity + Height | Delayed Implicit |
-| `Velocity-Height-G1-Distillation-Recurrent-v0` | Unitree G1 | Student (LSTM) | Velocity + Height | Delayed Implicit |
-| `Velocity-Height-G1-Distillation-History-v0` | Unitree G1 | Student (history) | Velocity + Height | Delayed Implicit |
+| `Velocity-Height-G1-Teacher-v0` | Unitree G1 | Teacher (privileged) | Velocity + Height | Delayed DC |
+| `Velocity-Height-G1-History-v0` | Unitree G1 | Direct history policy | Velocity + Height | Delayed DC |
+| `Velocity-Height-G1-Student-Recurrent-v0` | Unitree G1 | Student (LSTM) | Velocity + Height | Delayed DC |
+| `Velocity-Height-G1-Student-History-v0` | Unitree G1 | Student (history) | Velocity + Height | Delayed DC |
 
 ```{note}
 These tasks control only lower-body joints (legs). The upper body is left free for separate
@@ -185,9 +187,9 @@ fallen_state_dataset_cfg = FallenStateDatasetCfg(
 
 <table align="center">
   <tr>
-    <td align="center"><img src="g1_apple_grasp_black_sort_bin_multi_objects_no_marker_reduced.gif" width="280"></td>
+    <td align="center"><img src="unitree_g1_teleop.gif" width="280"></td>
   </tr>
-  <tr><td align="center"><em>Unitree G1 – Pick and Place</em></td></tr>
+  <tr><td align="center"><em>Unitree G1 – Teleoperation</em></td></tr>
 </table>
 
 This task demonstrates a **modular policy architecture**: a pre-trained, frozen locomotion
@@ -196,8 +198,8 @@ to track reference motion trajectories.
 
 | Task ID | Robot | Controlled Joints | Commands |
 |---------|-------|-------------------|----------|
-| `G1-PickPlace-Tracking-v0` | Unitree G1 | Right arm + hand + waist (16 joints) | Trajectory tracking |
-| `G1-PickPlace-Tracking-v0-Debug` | Unitree G1 | Same | Same (with GUI controls) |
+| `PickPlace-G1-v0` | Unitree G1 | Right arm + hand + waist (16 joints) | Trajectory tracking |
+| `PickPlace-G1-Debug-v0` | Unitree G1 | Same | Same (with GUI controls) |
 
 **Key features**:
 
@@ -228,7 +230,7 @@ and velocities from a reference trajectory.
 
 | Task ID | Robot | Controlled Joints | Commands | Observations |
 |---------|-------|-------------------|----------|--------------|
-| `Tracking-Flat-G1-v0` | Unitree G1 | Full body (29 joints) | Motion tracking | Single frame (no history) |
+| `MotionTracking-G1-v0` | Unitree G1 | Full body (29 joints) | Motion tracking | Single frame (no history) |
 
 **Key features**:
 
@@ -236,13 +238,6 @@ and velocities from a reference trajectory.
 - **No recurrence or history**: Pure reactive MLP policy operating on a single frame.
 - **BeyondMimic actuator model**: Uses system-identified motor parameters with no actuator delay.
 - **Anchor-relative tracking**: Rewards track body poses relative to a torso anchor, plus global anchor position and orientation.
-
-```{note}
-Due to licensing constraints, we do not include the pre-trained tracking checkpoint or the
-reference motion data in this repository. To obtain motion reference data for the Unitree G1,
-see the [AMASS Retargeted for G1](https://huggingface.co/datasets/ember-lab-berkeley/AMASS_Retargeted_for_G1/tree/main)
-dataset on Hugging Face. We provide a utility script `scripts/utils/convert_retargeted_data_for_tracking.py` to convert this downloaded data into a format ready for training.
-```
 
 ### Debug
 
@@ -273,10 +268,10 @@ and a real-time reward visualizer for monitoring individual reward terms.
 
 ```bash
 # Run joint debug
-python scripts/play.py --task Debug-G1-v0 --num_envs 2
+uv run scripts/play.py --task Debug-G1-v0 --num_envs 2
 
 # Run object interaction debug
-python scripts/play.py --task Debug-G1-Object-v0
+uv run scripts/play.py --task Debug-G1-Object-v0
 ```
 
 ## How Task Configs Compose MDP Components
@@ -418,8 +413,8 @@ Configure PPO hyperparameters in `agents/rsl_rl_ppo_cfg.py`, including network a
 
 ```bash
 # Validate environment (no policy, sinusoidal test actions)
-python scripts/play.py --task <TaskName>-<Robot>-v0 --num_envs 2
+uv run scripts/play.py --task <TaskName>-<Robot>-v0 --num_envs 2
 
 # Train
-python scripts/train.py --task <TaskName>-<Robot>-v0 --num_envs 4096 --headless
+uv run scripts/train.py --task <TaskName>-<Robot>-v0 --num_envs 4096 --headless
 ```

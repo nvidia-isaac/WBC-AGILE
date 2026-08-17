@@ -22,7 +22,10 @@ from pathlib import Path
 
 import mujoco
 import mujoco.viewer
+import numpy as np
 import torch
+
+from agile.sim2mujoco.camera import robot_root_body_id, robot_tracking_target
 
 
 @dataclass
@@ -118,6 +121,12 @@ class MuJocoSimulation:
         print(f"Loading MJCF from: {self.mjcf_path}")
         self.mj_model = mujoco.MjModel.from_xml_path(str(self.mjcf_path))
         self.mj_data = mujoco.MjData(self.mj_model)
+        self._renderer = None
+        self._video_tracking_body_id = robot_root_body_id(
+            self.mj_model.jnt_bodyid,
+            self.mj_model.jnt_type,
+            int(mujoco.mjtJoint.mjJNT_FREE),
+        )
 
         # Set timestep from config.
         scene_config = config.get("scene", {})
@@ -301,8 +310,6 @@ class MuJocoSimulation:
         written to ``mj_data.qpos`` on every ``reset()`` call.
         """
         # Default qpos for the full configuration vector.
-        import numpy as np
-
         self._default_qpos = np.zeros(self.mj_model.nq)
 
         # Set default root position for floating base robots.
@@ -358,15 +365,48 @@ class MuJocoSimulation:
                     self.mj_model.dof_armature[dof_addr] = default_joint_armature[yaml_idx]
             print(f"  Applied joint armature from config ({len(yaml_joint_names)} joints)")
 
-    def reset(self):
+    def reset(self, initial_state: str | dict | None = None):
         """Reset simulation to initial state."""
         mujoco.mj_resetData(self.mj_model, self.mj_data)
         # Apply stored default configuration directly to qpos.
         self.mj_data.qpos[:] = self._default_qpos
+        if isinstance(initial_state, dict):
+            self._apply_reference_initial_state(initial_state)
+        elif initial_state == "lying" and not self.fixed_base:
+            self.mj_data.qpos[:3] = [0.0, 0.0, 0.35]
+            # Quaternion order is wxyz. Pitch the nominal standing pose onto its side.
+            self.mj_data.qpos[3:7] = [0.70710678, 0.0, 0.70710678, 0.0]
+        elif initial_state not in (None, "standing"):
+            raise ValueError(f"Unsupported MuJoCo initial_state: {initial_state}")
         self.mj_data.ctrl[:] = 0
         self._push_sign = 0.0
         # Forward kinematics to compute derived quantities.
         mujoco.mj_forward(self.mj_model, self.mj_data)
+
+    def _apply_reference_initial_state(self, initial_state: dict) -> None:
+        """Apply a reference-motion state to qpos/qvel."""
+        if self.fixed_base:
+            return
+
+        from agile.sim2mujoco.utils import quat_rotate_inverse
+
+        def _numpy_value(name: str):
+            value = initial_state[name]
+            if isinstance(value, torch.Tensor):
+                value = value.detach().cpu().numpy()
+            return np.asarray(value, dtype=float)
+
+        self.mj_data.qpos[:3] = _numpy_value("root_pos")
+        self.mj_data.qpos[3:7] = _numpy_value("root_quat")
+        self.mj_data.qpos[7:] = _numpy_value("joint_pos")
+
+        root_quat = torch.as_tensor(self.mj_data.qpos[3:7].copy(), device=self.device, dtype=torch.float32)
+        root_ang_vel_w = torch.as_tensor(_numpy_value("root_ang_vel_w"), device=self.device, dtype=torch.float32)
+        root_ang_vel_b = quat_rotate_inverse(root_quat, root_ang_vel_w).detach().cpu().numpy()
+
+        self.mj_data.qvel[:3] = _numpy_value("root_lin_vel_w")
+        self.mj_data.qvel[3:6] = root_ang_vel_b
+        self.mj_data.qvel[6:] = _numpy_value("joint_vel")
 
     def get_state(self) -> SimState:
         """
@@ -404,7 +444,8 @@ class MuJocoSimulation:
 
                 world_lin_vel = torch.from_numpy(self.mj_data.qvel[:3].copy()).to(self.device)
                 # root_lin_vel = self._world_to_root_frame(world_lin_vel, root_quat)
-                world_ang_vel = torch.from_numpy(self.mj_data.qvel[3:6].copy()).to(self.device)
+                root_ang_vel_qvel = torch.from_numpy(self.mj_data.qvel[3:6].copy()).to(self.device)
+                world_ang_vel = quat_apply(root_quat, root_ang_vel_qvel)
 
                 root_body_id = self.mj_model.jnt_bodyid[0]
                 com_local = torch.from_numpy(self.mj_model.body_ipos[root_body_id].copy()).to(self.device)
@@ -416,9 +457,8 @@ class MuJocoSimulation:
             if self._root_angular_velocity_sensor is not None:
                 root_ang_vel = torch.from_numpy(self._root_angular_velocity_sensor.data.copy()).to(self.device)
             else:
-                # Fallback: Convert world frame angular velocity to root frame.
-                world_ang_vel = torch.from_numpy(self.mj_data.qvel[3:6].copy()).to(self.device)
-                root_ang_vel = self._world_to_root_frame(world_ang_vel, root_quat)
+                # MuJoCo free-joint angular qvel is already expressed in the local/root frame.
+                root_ang_vel = torch.from_numpy(self.mj_data.qvel[3:6].copy()).to(self.device)
 
         if self.fixed_base:
             joint_effort = torch.from_numpy(self.mj_data.qfrc_actuator.copy()).to(self.device)
@@ -443,6 +483,26 @@ class MuJocoSimulation:
             anchor_body_pos=anchor_body_pos,
             anchor_body_quat=anchor_body_quat,
         )
+
+    def capture_frame(self, width: int = 1280, height: int = 720) -> np.ndarray:
+        """Render an offscreen RGB frame (H, W, 3) uint8, camera tracking the robot root.
+
+        Works headless (no live viewer). Lazily builds one Renderer sized to width x height.
+        """
+        if self._renderer is None or self._renderer.height != height or self._renderer.width != width:
+            # MuJoCo's offscreen framebuffer defaults to 640x480; enlarge it to the requested size,
+            # else Renderer() raises "Image width N > framebuffer width 640".
+            self.mj_model.vis.global_.offwidth = max(int(self.mj_model.vis.global_.offwidth), width)
+            self.mj_model.vis.global_.offheight = max(int(self.mj_model.vis.global_.offheight), height)
+            self._renderer = mujoco.Renderer(self.mj_model, height=height, width=width)
+            self._video_cam = mujoco.MjvCamera()
+            self._video_cam.distance = 3.0
+            self._video_cam.azimuth = 135.0
+            self._video_cam.elevation = -20.0
+        # Track the robot's root body in world space rather than assuming qpos layout.
+        self._video_cam.lookat[:] = robot_tracking_target(self.mj_data.xpos, self._video_tracking_body_id)
+        self._renderer.update_scene(self.mj_data, camera=self._video_cam)
+        return self._renderer.render()
 
     def step(self, joint_cmd: JointCommand):
         """

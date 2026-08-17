@@ -1,10 +1,5 @@
-# Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
-#
-# NVIDIA CORPORATION and its licensors retain all intellectual property
-# and proprietary rights in and to this software, related documentation
-# and any modifications thereto.  Any use, reproduction, disclosure or
-# distribution of this software and related documentation without an express
-# license agreement from NVIDIA CORPORATION is strictly prohibited.
+# SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
 version: 2
 workflow:
   name: '{{workflow_name}}'
@@ -28,7 +23,7 @@ workflow:
           OMNI_PASS: omni_pass
           OMNI_USER: omni_user
         wandb:
-          WANDB_API_KEY: wandb_pass
+          WANDB_API_KEY: wandb_api_key
           WANDB_USERNAME: wandb_user
       files:
         - path: /tmp/entry.sh
@@ -110,7 +105,8 @@ workflow:
             DOWNLOAD_SCRIPT
 
               # Run the download script
-              ${ISAACLAB_PATH}/isaaclab.sh -p /tmp/download_checkpoint.py "{{wandb_run_path}}" "{{iteration}}" "$CHECKPOINT_DIR"
+              uv run --frozen --offline --no-sync python /tmp/download_checkpoint.py \
+                "{{wandb_run_path}}" "{{iteration}}" "$CHECKPOINT_DIR"
 
               CHECKPOINT_PATH=$(cat /tmp/checkpoint_path.txt)
               echo "Checkpoint downloaded to: $CHECKPOINT_PATH"
@@ -126,7 +122,7 @@ workflow:
             echo ""
 
             # Run evaluation with deterministic scenario
-            ${ISAACLAB_PATH}/isaaclab.sh -p scripts/eval.py \
+            uv run --frozen --offline --no-sync scripts/eval.py \
               --task {{task_name}} \
               --checkpoint "$CHECKPOINT_PATH" \
               --eval_config {{eval_config_path}} \
@@ -150,7 +146,7 @@ workflow:
               echo "Log directory: $EVAL_LOG_DIR"
 
               # Generate HTML report using Isaac Lab Python
-              ${ISAACLAB_PATH}/isaaclab.sh -p agile/algorithms/evaluation/generate_report.py \
+              uv run --frozen --offline --no-sync agile/algorithms/evaluation/generate_report.py \
                 --log_dir "$EVAL_LOG_DIR" \
                 --no-browser
 
@@ -162,14 +158,14 @@ workflow:
               # Upload results to wandb using Isaac Lab Python
               if [ "$USE_LOCAL_CHECKPOINT" = "true" ]; then
                 # For local checkpoints, omit checkpoint_iteration
-                ${ISAACLAB_PATH}/isaaclab.sh -p agile/algorithms/evaluation/upload_to_wandb.py \
+                uv run --frozen --offline --no-sync agile/algorithms/evaluation/upload_to_wandb.py \
                   --log_dir "$EVAL_LOG_DIR" \
                   --wandb_project {{project_name}} \
                   --wandb_run_name {{run_name}}_eval_local \
                   --training_wandb_run "local_checkpoint"
               else
                 # For wandb checkpoints, include iteration info
-                ${ISAACLAB_PATH}/isaaclab.sh -p agile/algorithms/evaluation/upload_to_wandb.py \
+                uv run --frozen --offline --no-sync agile/algorithms/evaluation/upload_to_wandb.py \
                   --log_dir "$EVAL_LOG_DIR" \
                   --wandb_project {{project_name}} \
                   --wandb_run_name {{run_name}}_eval_iter{{iteration}} \
@@ -199,7 +195,7 @@ default-values:
   image: '{{image_default}}'
   omni_server: omniverse://localhost
   workflow_name: agile_eval
-  task_name: Velocity-Height-G1-Dev-v0
+  task_name: Velocity-Height-G1-History-v0
   project_name: agile_evaluation
   run_name: eval
   wandb_run_path: nvidia-isaac/project/run_id

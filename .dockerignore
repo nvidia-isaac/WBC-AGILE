@@ -1,14 +1,38 @@
+# Local uv virtual environment (tens of GB). It must never enter the build
+# context: it would balloon the context transfer and, because its path collides
+# with UV_PROJECT_ENVIRONMENT (/workspace/agile/.venv), the source COPY would
+# overwrite the image's freshly-built venv with host-specific (broken) paths,
+# forcing a full reinstall on every build.
+.venv/
+
 logs/
 run.py
 wandb/
 outputs/
 assets/
 
+# Robot mesh/URDF/MJCF assets only used for mujoco eval, not Isaac Sim training
+external_assets/
+agile/rl_env/assets/unitree_mujoco/
+agile/rl_env/assets/unitree_description/
+agile/rl_env/assets/robot_menagerie/
+
+# Documentation and media
+docs/
+
+# Tests
+tests/
+agile/rl_env/tests/
+
+# Release tooling
+release/
+
 # Common development files and directories
 .git/
 # .git_info/ is included (contains lightweight git info for reproducibility)
 .gitignore
 .env
+workflows/run_config.yaml
 __pycache__/
 *.pyc
 *.pyo
@@ -24,3 +48,7 @@ dist/
 .vscode/
 .idea/
 .cursor/
+.claude/
+CONTRIBUTING.md
+OFFICE_HOUR_FAQ.md
+README_INTERNAL.md

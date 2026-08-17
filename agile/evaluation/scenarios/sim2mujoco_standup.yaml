@@ -1,0 +1,16 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+evaluation:
+  task_name: standup
+  num_envs: 1
+  episode_length_s: 10.0
+  num_episodes: 1
+  sim2mujoco:
+    initial_state: lying
+  environments:
+    - env_ids: [0]
+      name: standup_from_lying
+      schedule:
+        - time: 0.0
+          events:
+            initial_state: lying

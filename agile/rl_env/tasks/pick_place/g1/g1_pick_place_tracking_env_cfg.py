@@ -18,8 +18,8 @@ import math
 import isaaclab.sim as sim_utils
 from isaaclab.assets import AssetBaseCfg
 from isaaclab.sensors import CameraCfg, ContactSensorCfg, TiledCameraCfg
-from isaaclab.utils import configclass
 from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR
+from isaaclab.utils.configclass import configclass
 
 from agile.rl_env.assets import ASSET_DIR
 from agile.rl_env.assets.robots.unitree_g1 import (
@@ -42,7 +42,8 @@ class G1PickPlaceTrackingEnvCfg(PickPlaceTrackingEnvCfg):
 
         self.scene.robot = G1_W_HANDS_AGILE_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
         self.scene.robot.init_state.pos = [-1.5, -0.7, 0.8]
-        self.scene.robot.init_state.rot = [0.7071068, 0, 0, 0.7071068]
+        # (x, y, z, w): 90° rotation about Z (was wxyz [0.7071068, 0, 0, 0.7071068]).
+        self.scene.robot.init_state.rot = [0, 0, 0.7071068, 0.7071068]
         self.scene.robot.init_state.joint_pos = {
             ".*_hip_pitch_joint": -0.10,
             ".*_knee_joint": 0.30,
@@ -60,7 +61,7 @@ class G1PickPlaceTrackingEnvCfg(PickPlaceTrackingEnvCfg):
 
         self.scene.fixture_structure.init_state.pos = [0.0, 0.0, 0.0]
         self.scene.object.init_state.pos = [0.3872, 0.2480, 0.738]
-        self.scene.object.init_state.rot = [0.7071068, 0.7071068, 0.0, 0.0]  # 90° rotation around X
+        self.scene.object.init_state.rot = [0.7071068, 0.0, 0.0, 0.7071068]  # (x, y, z, w): 90° rotation around X
 
         self.commands.tracking_command.file_path = (
             f"{ASSET_DIR}/motion_data/object_pick_and_place_retarget_motion_g1_3finger_hands.yaml"
@@ -115,7 +116,8 @@ class G1PickPlaceTrackingEnvCfgRecord(G1PickPlaceTrackingEnvCfg):
                 focus_distance=400.0,
                 clipping_range=(0.1, 20.0),
             ),
-            offset=CameraCfg.OffsetCfg(pos=(0.1, 0.0, 0.45), rot=(-0.29, 0.64, -0.64, 0.29), convention="ros"),
+            # rot is (x, y, z, w) in Isaac Lab 3.0 (was wxyz (-0.29, 0.64, -0.64, 0.29)).
+            offset=CameraCfg.OffsetCfg(pos=(0.1, 0.0, 0.45), rot=(0.64, -0.64, 0.29, -0.29), convention="ros"),
         )
 
         # Add dome light for visual randomization
@@ -157,7 +159,7 @@ class G1PickPlaceTrackingEnvCfgGr00tInference(G1PickPlaceTrackingEnvCfgRecord):
             prim_path="{ENV_REGEX_NS}/Background",
             init_state=AssetBaseCfg.InitialStateCfg(
                 pos=(0, 0, 0.01),  # Adjusted to avoid height competition issues.
-                rot=(1.0, 0.0, 0.0, 0.0),
+                rot=(0.0, 0.0, 0.0, 1.0),  # identity (x, y, z, w)
             ),
             spawn=sim_utils.UsdFileCfg(
                 usd_path="https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Environments/Simple_Warehouse/warehouse.usd",
@@ -210,8 +212,8 @@ class G1PickPlaceTrackingEnvCfgDebug(G1PickPlaceTrackingEnvCfg):
 
         # Using a position similar to the motion data starting frame for consistency
         self.scene.robot.init_state.pos = [0.15, -0.5, 0.78]
-        # Quaternion [w, x, y, z] for 90° rotation around Z-axis (facing +Y direction)
-        self.scene.robot.init_state.rot = [0.7071068, 0.0, 0.0, 0.7071068]
+        # Quaternion [x, y, z, w] for 90° rotation around Z-axis (facing +Y direction)
+        self.scene.robot.init_state.rot = [0.0, 0.0, 0.7071068, 0.7071068]
 
         # Disable original action terms to avoid conflicts with GUI control
         self.actions.upper_body_joint_pos = None  # type: ignore[assignment]

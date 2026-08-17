@@ -1,0 +1,66 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+version: 2
+workflow:
+  name: '{{workflow_name}}'
+  resources:
+    default:
+      cpu: 4
+      gpu: 1
+      memory: 100Gi
+      storage: 100Gi
+  tasks:
+    - name: eval
+      image: '{{image}}'
+      command: ["/bin/bash"]
+      args: ["/tmp/entry.sh"]
+      environment:
+        ACCEPT_EULA: Y
+        OMNI_SERVER: '{{omni_server}}'
+        PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION: python
+      credentials:
+        omni-auth:
+          OMNI_PASS: omni_pass
+          OMNI_USER: omni_user
+        wandb:
+          WANDB_API_KEY: wandb_api_key
+          WANDB_USERNAME: wandb_user
+      files:
+        - path: /tmp/entry.sh
+          contents: |
+            set -e
+            export MUJOCO_GL=egl
+
+            uv run --frozen --no-sync agile-download-assets
+
+            EVAL_RC=0
+            timeout 4h uv run --frozen --offline --no-sync scripts/eval_pipeline.py \
+              --task {{task_name}} \
+              --run-label {{run_label}} \
+              {% if wandb_run is defined %}--wandb_run {{wandb_run}}{% else %}--checkpoint {{checkpoint_path}}{% endif %} \
+              {% if wandb_iteration is defined %}--wandb-iteration {{wandb_iteration}}{% endif %} \
+              {% if wandb_checkpoint_file is defined %}--wandb-checkpoint-file {{wandb_checkpoint_file}}{% endif %} \
+              {% if wandb_artifact_version is defined %}--wandb-artifact-version {{wandb_artifact_version}}{% endif %} \
+              {% if evaluation_spec is defined %}--evaluation-spec {{evaluation_spec}}{% endif %} \
+              --mjcf {{mjcf}} \
+              --output-dir outputs || EVAL_RC=$?
+
+            mkdir -p /osmo/data/output
+            if [ -d outputs ]; then
+              cp -a outputs/. /osmo/data/output/
+            fi
+            chmod -R a+rX /osmo/data/output
+            exit $EVAL_RC
+      outputs:
+        - url: '{{storage_url_prefix}}/{{workflow_id}}/'
+default-values:
+  # image_default is set by run.py when submitting; fallback for manual runs (must match run_config container_registry.image_name)
+  image_default: docker.io/yourorg/agile:latest
+  image: '{{image_default}}'
+  omni_server: omniverse://localhost
+  workflow_name: agile_e2e_eval
+  task_name: Velocity-Height-G1-History-v0
+  run_label: manual
+  mjcf: external_assets/unitree_mujoco/unitree_robots/g1/scene_29dof.xml
+  checkpoint_path: /workspace/agile/agile/data/policy/eval/model.pt
+  storage_url_prefix: swift://pdx.s8k.io/AUTH_team-isaac/datasets/agile-eval

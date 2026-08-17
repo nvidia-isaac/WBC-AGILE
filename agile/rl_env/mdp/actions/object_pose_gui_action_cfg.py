@@ -22,7 +22,7 @@ from dataclasses import field
 from typing import TYPE_CHECKING
 
 from isaaclab.managers.action_manager import ActionTerm, ActionTermCfg
-from isaaclab.utils import configclass
+from isaaclab.utils.configclass import configclass
 
 if TYPE_CHECKING:
     pass

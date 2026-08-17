@@ -19,10 +19,9 @@ omniverse:
   # For local development without Omniverse, use:
   #   server_url: omniverse://localhost
   server_url: omniverse://localhost
-wandb:
-  # Weights & Biases team name for logging
-  team_name: your-team-name
 storage:
+  # Swift/S3-compatible destination used by OSMO to upload workflow outputs
+  osmo_output_url_prefix: swift://your-osmo-storage-url/agile
   # OSMO storage URL for workflow artifacts
   # This is used to download checkpoints from completed workflows
   osmo_storage_url: https://your-osmo-storage-url/
@@ -33,4 +32,5 @@ paths:
   workflows_dir: .
   train_workflow: ./train_workflow.yaml
   eval_workflow: ./eval_workflow.yaml
+  eval_pipeline_workflow: ./e2e_eval_workflow.yaml
   sweep_workflow: ./sweep_workflow.yaml

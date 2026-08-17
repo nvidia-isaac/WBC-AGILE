@@ -108,8 +108,8 @@ class SmoothHeightCommand(CommandTerm):
 
     def _tracked_point_pos_w(self) -> torch.Tensor:
         """Compute the world position of the tracked point (body origin + rotated offset). Shape: [num_envs, 3]."""
-        body_pos_w = self.robot.data.body_pos_w[:, self._body_id, :]  # (num_envs, 3)
-        body_quat_w = self.robot.data.body_quat_w[:, self._body_id, :]  # (num_envs, 4)
+        body_pos_w = self.robot.data.body_pos_w.torch[:, self._body_id, :]  # (num_envs, 3)
+        body_quat_w = self.robot.data.body_quat_w.torch[:, self._body_id, :]  # (num_envs, 4)
         offset_w = quat_apply(body_quat_w, self._offset_local.expand(self.num_envs, -1))
         return body_pos_w + offset_w
 

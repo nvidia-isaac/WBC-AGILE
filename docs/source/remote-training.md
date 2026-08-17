@@ -30,20 +30,22 @@ Set up access to a container registry:
 docker login docker.io
 ```
 
-### 4. Kubernetes Secrets
+### 4. OSMO Credentials
 
-Configure credentials in your Kubernetes cluster:
+Create generic OSMO credentials with the names and fields referenced by the workflow files:
 
 ```bash
-# W&B credentials (required)
-kubectl create secret generic wandb-credentials \
-  --from-literal=wandb_pass=your_api_key \
-  --from-literal=wandb_user=your-team-name
+# W&B credential (required)
+export WANDB_API_KEY=your_api_key
+osmo credential set wandb --type GENERIC \
+  --payload wandb_api_key="${WANDB_API_KEY}" wandb_user=your-team-name
+unset WANDB_API_KEY
 
-# Omniverse credentials (optional)
-kubectl create secret generic omni-auth \
-  --from-literal=omni_pass=your_password \
-  --from-literal=omni_user=your_username
+# Omniverse credential (optional)
+export OMNI_PASSWORD=your_password
+osmo credential set omni-auth --type GENERIC \
+  --payload omni_pass="${OMNI_PASSWORD}" omni_user=your_username
+unset OMNI_PASSWORD
 ```
 
 ### 5. Run Configuration
@@ -58,6 +60,8 @@ cp run_config.example.yaml run_config.yaml
 Update these fields:
 - `image_name`: Your container registry path (e.g., `docker.io/myorg/agile`)
 - `osmo_pools`: Your OSMO compute pool names
+- `osmo_output_url_prefix`: A Swift/S3-compatible prefix where OSMO uploads workflow outputs
+- `osmo_storage_url`: The HTTP endpoint used to download completed workflow outputs
 
 ## Training
 
@@ -88,23 +92,23 @@ Use `--rebuild` after code changes and `--use-existing` to reuse a previously bu
 # Evaluate latest checkpoint from a W&B training run
 ./run.py eval --name eval_test \
     --wandb_run your-team/project/run_id \
-    --task_name Velocity-Height-G1-Dev-v0
+    --task_name Velocity-Height-G1-History-v0
 
 # Evaluate specific checkpoints
 ./run.py eval --name multi_ckpt \
     --wandb_run your-team/project/run_id \
-    --task_name Velocity-Height-G1-Dev-v0 \
+    --task_name Velocity-Height-G1-History-v0 \
     --checkpoints 5000,10000,15000
 
 # Evaluate a local checkpoint
 ./run.py eval --name eval_local \
     --checkpoint_path /path/to/model_5000.pt \
-    --task_name Velocity-Height-G1-Dev-v0
+    --task_name Velocity-Height-G1-History-v0
 
 # With custom evaluation scenario
 ./run.py eval --name custom_eval \
     --wandb_run your-team/project/run_id \
-    --task_name Velocity-Height-G1-Dev-v0 \
+    --task_name Velocity-Height-G1-History-v0 \
     --eval_config agile/algorithms/evaluation/configs/examples/multi_env_capability_test.yaml
 ```
 
@@ -147,17 +151,17 @@ done
 
 ## Docker Image
 
-The `workflows/Dockerfile` builds on `nvcr.io/nvidia/isaac-lab:2.3.2`:
+The `workflows/Dockerfile` builds on `nvcr.io/nvidia/isaac-lab:3.0.0-beta2`:
 
-1. Installs Python dependencies into Isaac Lab's environment
-2. Removes conflicting rsl_rl packages
-3. Installs custom rsl_rl with TensorDict support
+1. Installs uv
+2. Syncs AGILE's locked uv environment, including Isaac Lab, LEAPP, and public `rsl-rl-lib==5.4.1`
+3. Applies AGILE's RSL-RL compatibility patch
 4. Verifies correct installation
 
 ```bash
 # Build and test locally
 docker build -f workflows/Dockerfile -t agile:test .
-docker run --rm agile:test ${ISAACLAB_PATH}/isaaclab.sh -p scripts/verify_rsl_rl.py
+docker run --rm agile:test uv run --frozen --offline --no-sync scripts/verify_rsl_rl.py
 ```
 
 ## Manual Workflow Submission
@@ -169,17 +173,16 @@ You can also build and submit workflows directly without `run.py`:
 docker build -f workflows/Dockerfile -t docker.io/myorg/agile:latest .
 docker push docker.io/myorg/agile:latest
 
-# Submit workflow
-export WANDB_API_KEY=your_key
+# Submit workflow. The named OSMO credentials provide W&B and Omniverse secrets.
 osmo workflow submit workflows/train_workflow.yaml \
   --pool=your-gpu-pool \
-  --set workflow_name=my_first_training \
-  --set image=docker.io/myorg/agile:latest \
-  --set task_name=Velocity-T1-v0 \
-  --set project_name=my_project \
-  --set run_name=experiment_1 \
-  --set wandb_pass=$WANDB_API_KEY \
-  --set wandb_username=your-team
+  --set \
+    workflow_name=my_first_training \
+    image=docker.io/myorg/agile:latest \
+    task_name=Velocity-T1-v0 \
+    project_name=my_project \
+    run_name=experiment_1 \
+    storage_url_prefix=swift://your-osmo-storage-url/agile
 ```
 
 ## Advanced Workflow Patterns
@@ -196,7 +199,7 @@ credentials:
     OMNI_PASS: omni_pass
     OMNI_USER: omni_user
   wandb:
-    WANDB_API_KEY: wandb_pass
+    WANDB_API_KEY: wandb_api_key
     WANDB_USERNAME: wandb_user
 ```
 
@@ -208,7 +211,7 @@ Entry scripts are generated dynamically using OSMO's Jinja templating:
 files:
   - path: /tmp/entry.sh
     contents: |
-      CMD="${ISAACLAB_PATH}/isaaclab.sh -p scripts/train.py "
+      CMD="uv run --frozen --offline --no-sync scripts/train.py "
       {% if seed is defined %}
       CMD+="--seed {{seed}} "
       {% endif %}
@@ -233,14 +236,14 @@ file.download(root=checkpoint_dir)
 
 ### Dataset Outputs
 
-OSMO automatically versions and stores outputs with content-addressable storage:
+Training and sweep workflows upload outputs to the configured Swift/S3-compatible prefix:
 
 ```yaml
 outputs:
-  - dataset:
-      name: agile:{{workflow_id}}
-      path: outputs
+  - url: '{{storage_url_prefix}}/{{workflow_id}}/'
 ```
+
+Use `osmo_storage_url` to configure the corresponding HTTP download endpoint for completed outputs.
 
 ## Monitoring
 
@@ -264,5 +267,5 @@ osmo workflow port-forward <workflow-name> train --port 8080  # Debug
 | Workflow stuck | Check logs: `osmo workflow logs <workflow-name>` |
 | `ModuleNotFoundError: tensordict` | Rebuild Docker image with `--rebuild` |
 | Wrong rsl_rl version | Run `scripts/verify_rsl_rl.py` to check |
-| Docker build fails | Check `agile/algorithms/rsl_rl/` exists |
+| Docker build fails | Rebuild with `--no-cache` and check `scripts/verify_rsl_rl.py` |
 | Isaac Sim init failures | Wrapper auto-retries (2 attempts with 10s delay) |

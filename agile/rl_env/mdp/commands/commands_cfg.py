@@ -19,7 +19,7 @@ from __future__ import annotations
 from dataclasses import MISSING
 
 from isaaclab.envs.mdp.commands import UniformVelocityCommandCfg
-from isaaclab.utils import configclass
+from isaaclab.utils.configclass import configclass
 
 from agile.rl_env.mdp.commands.commands import (
     UniformNullVelocityCommand,
@@ -50,6 +50,44 @@ class UniformNullVelocityCommandCfg(UniformVelocityCommandCfg):
 
     min_vel_norm: float = 0.1
     """Minimum velocity norm,velocity commands with a norm less than this value are set to 0"""
+
+    bias_sampling: bool = False
+    """Enable biased sampling toward lower speeds. When True, samples velocities from a piecewise
+    uniform distribution that favors low speeds."""
+
+    bias_sampling_probability: float = 0.6
+    """Probability of sampling from the low-speed range when bias_sampling is True.
+    For example, 0.5 means 50% of samples come from the low-speed range."""
+
+    bias_sampling_speed: float = 0.2
+    """Maximum speed for the low-speed range when bias_sampling is True (in m/s for linear velocities,
+    rad/s for angular velocities). Commands are sampled from [-bias_sampling_speed, bias_sampling_speed]
+    with probability bias_sampling_probability."""
+
+    command_filter_alpha_ranges: dict[str, tuple[float, float] | None] | None = None
+    """Per-axis low-pass filter coefficient ranges for smooth command transitions.
+
+    Keys are axis names that correspond to command dimensions.
+    Base class supports: 'lin_vel_x', 'lin_vel_y', 'ang_vel_z'
+    Subclasses can add additional axes (e.g., 'base_height' for height commands).
+
+    Values are tuples (min_alpha, max_alpha) for random sampling per environment.
+    Alpha values should be in [0, 1] where:
+    - 1.0 = no filtering (instant response)
+    - 0.0 = maximum filtering (no change)
+    - Typical values: 0.05-0.3 for smooth transitions
+
+    Example:
+        command_filter_alpha_ranges = {
+            "lin_vel_x": (0.05, 0.2),  # Smooth linear x velocity
+            "lin_vel_y": (0.05, 0.2),  # Smooth linear y velocity
+            "ang_vel_z": (0.1, 0.3),   # Slightly faster angular response
+            # "base_height": (0.02, 0.1),  # Height filtering (if using height commands)
+        }
+
+    If not provided or empty dict, no filtering is applied (backward compatible).
+    Subclasses handle their additional axes independently.
+    """
 
 
 @configclass

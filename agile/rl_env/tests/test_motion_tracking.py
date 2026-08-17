@@ -18,7 +18,7 @@
 These tests only import from ``agile.common`` (Isaac-Lab-free) so they can
 run without initialising the Isaac Sim runtime.
 
-Run via: ${ISAACLAB_PATH}/isaaclab.sh -p agile/rl_env/tests/test_motion_tracking.py
+Run via: uv run agile/rl_env/tests/test_motion_tracking.py
 """
 
 from __future__ import annotations
