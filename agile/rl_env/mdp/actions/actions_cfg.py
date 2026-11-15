@@ -88,7 +88,7 @@ class RandomActionCfg(mdp.JointActionCfg):
 class JointPositionGUIActionCfg(mdp.JointActionCfg):
     """Configuration for the joint position action term.
 
-    See :class:`JointPositionAction` for more details.
+    See :class:`JointPositionGUIAction` for more details.
     """
 
     # Register the GUI action so that the action manager instantiates our implementation.
@@ -102,9 +102,22 @@ class JointPositionGUIActionCfg(mdp.JointActionCfg):
     from the articulation asset.
     """
     max_stiffness: float = 200.0
-    """Maximum stiffness for the P-gain slider. Defaults to 200.0."""
+    """Default maximum stiffness for the P-gain slider. Defaults to 200.0.
+
+    A slider expands to the joint's configured gain when that gain exceeds this value.
+    """
     max_damping: float = 25.0
-    """Maximum damping for the D-gain slider. Defaults to 25.0."""
+    """Default maximum damping for the D-gain slider. Defaults to 25.0.
+
+    A slider expands to the joint's configured gain when that gain exceeds this value.
+    """
+
+    pose_transition_duration_s: float = 1.0
+    """Duration of GUI-triggered pose transitions, in seconds. Defaults to 1.0.
+
+    The duration is captured when Randomize or Reset to Default is pressed, so changing
+    it does not alter a transition already in progress.
+    """
 
     mirror_actions: bool = True
     """Whether to mirror the actions. Defaults to True."""

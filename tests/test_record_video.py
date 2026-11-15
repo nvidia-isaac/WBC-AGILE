@@ -11,6 +11,7 @@ import pytest
 
 from agile.isaaclab_extras.record_video import (
     EfficientRecordVideo,
+    _hide_non_recorded_environments,
     _offscreen_video_is_only_kit_consumer,
     _update_tracked_asset_recording_camera,
 )
@@ -139,6 +140,40 @@ def test_standalone_visualizer_is_eligible():
     env.sim.visualizers = (SimpleNamespace(pumps_app_update=lambda: False),)
 
     assert _offscreen_video_is_only_kit_consumer(env, _headless_launcher())
+
+
+def test_offscreen_video_hides_every_cloned_environment_except_viewer_target():
+    calls = []
+    env = SimpleNamespace(
+        cfg=SimpleNamespace(viewer=SimpleNamespace(env_index=2), scene=SimpleNamespace(num_envs=4)),
+        scene=SimpleNamespace(num_envs=4),
+    )
+
+    hidden_count = _hide_non_recorded_environments(
+        env, set_visibility=lambda path, visible: calls.append((path, visible)) or True
+    )
+
+    assert hidden_count == 3
+    assert calls == [
+        ("/World/envs/env_0", False),
+        ("/World/envs/env_1", False),
+        ("/World/envs/env_3", False),
+    ]
+
+
+def test_offscreen_video_visibility_is_unchanged_for_a_single_environment():
+    calls = []
+    env = SimpleNamespace(
+        cfg=SimpleNamespace(viewer=SimpleNamespace(env_index=0), scene=SimpleNamespace(num_envs=1)),
+        scene=SimpleNamespace(num_envs=1),
+    )
+
+    hidden_count = _hide_non_recorded_environments(
+        env, set_visibility=lambda path, visible: calls.append((path, visible)) or True
+    )
+
+    assert hidden_count == 0
+    assert calls == []
 
 
 def test_wrapper_suppresses_only_the_underlying_step_and_restores_state(tmp_path):

@@ -15,7 +15,9 @@
 
 from __future__ import annotations
 
+import math
 import threading
+from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
 import torch
@@ -58,30 +60,28 @@ class JointPositionGUIAction(JointPositionAction):
         # (defined below __init__).
         self._desired_pos = self._select_joints(self._asset.data.joint_pos.torch).clone()
 
-        # Desired PD gains for the robot actuators
-        # IMPORTANT: We need to build the gains in the correct joint order, not actuator order
-        # Build full gains tensor for all joints, then select the subset we need
-        num_all_joints = self._asset.num_joints
-        full_stiffness = torch.zeros(self.num_envs, num_all_joints, device=self.device)
-        full_damping = torch.zeros(self.num_envs, num_all_joints, device=self.device)
-
-        # Populate gains from each actuator in the correct joint positions
-        for actuator in self._asset.actuators.values():
-            # Get the joint IDs controlled by this actuator
-            actuator_joint_ids = self._asset.find_joints(actuator.joint_names)[0]
-            # Copy the gains to the correct positions
-            full_stiffness[:, actuator_joint_ids] = actuator.stiffness
-            full_damping[:, actuator_joint_ids] = actuator.damping
-
-        # Now select only the joints we care about for this action term
-        self._desired_stiffness = self._select_joints(full_stiffness).clone()
-        self._desired_damping = self._select_joints(full_damping).clone()
+        # Map action columns to their owning actuator columns once. Articulation joint order
+        # is not necessarily grouped by actuator (for example, G1 waist joints are
+        # interleaved with its legs), so actuator tensors must never be concatenated and
+        # treated as if they were in articulation order.
+        self._actuator_bindings = self._resolve_actuator_bindings()
+        self._desired_stiffness = self._read_selected_actuator_property("stiffness")
+        self._desired_damping = self._read_selected_actuator_property("damping")
 
         # Store default gains for reset
         self._default_stiffness = self._desired_stiffness.clone()
         self._default_damping = self._desired_damping.clone()
         self._mirror_actions = cfg.mirror_actions
         self._robot_type = cfg.robot_type
+
+        if not math.isfinite(cfg.pose_transition_duration_s) or cfg.pose_transition_duration_s <= 0.0:
+            raise ValueError("pose_transition_duration_s must be finite and greater than zero")
+        self._pose_transition_duration_s = float(cfg.pose_transition_duration_s)
+        self._position_transition_start = self._desired_pos.clone()
+        self._position_transition_target = self._desired_pos.clone()
+        self._position_transition_elapsed_s = 0.0
+        self._position_transition_duration_s = self._pose_transition_duration_s
+        self._position_transition_active = False
 
         if self._robot_type == "g1":
             self._symmetry_augmentation_func = lr_mirror_G1
@@ -123,44 +123,53 @@ class JointPositionGUIAction(JointPositionAction):
                 with dpg.theme_component(dpg.mvStemSeries):
                     dpg.add_theme_style(dpg.mvPlotStyleVar_LineWeight, 5, category=dpg.mvThemeCat_Plots)
 
+            effort_limits = self._read_selected_actuator_property("effort_limit")[0].cpu()
+
             def _reset_joints_cb() -> None:
-                """Reset all joints to their default positions and gains."""
+                """Smoothly reset all joints to their default positions and gains."""
+                self._start_default_position_transition()
                 with self._lock:
-                    # Default positions for all envs
-                    default_pos = self._select_joints(self._asset.data.default_joint_pos.torch)
-                    self._desired_pos[:] = default_pos.clone()
-                    self._desired_stiffness[:] = self._default_stiffness.clone()
-                    self._desired_damping[:] = self._default_damping.clone()
-                    # Update all GUI sliders
-                    for i in range(len(self._joint_names)):
-                        dpg.set_value(pos_slider_tags[i], float(self._desired_pos[0, i].cpu()))
-                        dpg.set_value(
-                            stiffness_slider_tags[i],
-                            float(self._desired_stiffness[0, i].cpu()),
-                        )
-                        dpg.set_value(
-                            damping_slider_tags[i],
-                            float(self._desired_damping[0, i].cpu()),
-                        )
+                    desired_stiffness = self._desired_stiffness[0].cpu()
+                    desired_damping = self._desired_damping[0].cpu()
+
+                # Position sliders follow the transition in the GUI loop. Gain sliders
+                # can be updated immediately because gains are not interpolated.
+                for i in range(len(self._joint_names)):
+                    dpg.set_value(stiffness_slider_tags[i], float(desired_stiffness[i]))
+                    dpg.set_value(damping_slider_tags[i], float(desired_damping[i]))
 
             def _randomize_joints_cb() -> None:
-                """Randomize all joints within their limits."""
-                with self._lock:
-                    limits = self._select_joints(self._asset.data.soft_joint_pos_limits.torch[0].T).T.cpu()
-                    low = limits[:, 0]
-                    high = limits[:, 1]
-                    # Generate random positions
-                    random_pos = low + (high - low) * torch.rand_like(low)
-                    # Update desired positions for all environments
-                    self._desired_pos[:] = random_pos.unsqueeze(0)
-                    # Update GUI sliders
-                    for i in range(len(self._joint_names)):
-                        dpg.set_value(pos_slider_tags[i], float(self._desired_pos[0, i].cpu()))
+                """Smoothly move all joints to a random pose within their limits."""
+                limits = self._select_joints(self._asset.data.soft_joint_pos_limits.torch[0].T).T.cpu()
+                low = limits[:, 0]
+                high = limits[:, 1]
+                random_pos = low + (high - low) * torch.rand_like(low)
+                self._start_position_transition(random_pos)
 
-            # Add reset button
+            def _transition_duration_cb(sender, app_data, user_data) -> None:  # type: ignore  # noqa: ARG001
+                duration_s = float(app_data)
+                if not math.isfinite(duration_s) or duration_s <= 0.0:
+                    with self._lock:
+                        duration_s = self._pose_transition_duration_s
+                    dpg.set_value(sender, duration_s)
+                    return
+                with self._lock:
+                    self._pose_transition_duration_s = duration_s
+
             with dpg.group(horizontal=True):
                 dpg.add_button(label="Reset to Default", callback=_reset_joints_cb)
                 dpg.add_button(label="Randomize", callback=_randomize_joints_cb)
+            dpg.add_input_float(
+                label="Pose transition duration (s)",
+                default_value=self._pose_transition_duration_s,
+                min_value=0.1,
+                min_clamped=True,
+                step=0.25,
+                step_fast=1.0,
+                format="%.2f",
+                width=100,
+                callback=_transition_duration_cb,
+            )
             dpg.add_separator()
 
             # Iterate over joints
@@ -180,9 +189,7 @@ class JointPositionGUIAction(JointPositionAction):
 
                         # -- Position slider
                         def _slider_cb(sender, app_data, user_data) -> None:  # type: ignore  # noqa: ARG001
-                            idx: int = user_data
-                            with self._lock:
-                                self._desired_pos[:, idx] = float(app_data)
+                            self._set_desired_joint_position(user_data, float(app_data))
 
                         pos_slider_tag = dpg.add_slider_float(
                             label=f"[{local_id}] {joint_name}",
@@ -205,7 +212,7 @@ class JointPositionGUIAction(JointPositionAction):
                         stiffness_slider_tag = dpg.add_slider_float(
                             label="P-Gain",
                             min_value=0.0,
-                            max_value=self.cfg.max_stiffness,
+                            max_value=max(self.cfg.max_stiffness, current_stiffness),
                             default_value=current_stiffness,
                             callback=_stiffness_slider_cb,
                             user_data=local_id,
@@ -224,7 +231,7 @@ class JointPositionGUIAction(JointPositionAction):
                         damping_slider_tag = dpg.add_slider_float(
                             label="D-Gain",
                             min_value=0.0,
-                            max_value=self.cfg.max_damping,
+                            max_value=max(self.cfg.max_damping, current_damping),
                             default_value=current_damping,
                             callback=_damping_slider_cb,
                             user_data=local_id,
@@ -237,10 +244,7 @@ class JointPositionGUIAction(JointPositionAction):
                     # Group for the effort plot on the right
                     with dpg.group():
                         # -- Effort visualization
-                        effort_limit = torch.cat(
-                            [v.effort_limit for v in self._asset.actuators.values()],
-                            dim=-1,
-                        )[0, joint_idx].item()
+                        effort_limit = effort_limits[local_id].item()
                         with dpg.plot(
                             no_title=True,
                             no_menus=True,
@@ -279,12 +283,15 @@ class JointPositionGUIAction(JointPositionAction):
         while dpg.is_dearpygui_running():
             # Read data from asset
             with self._lock:
+                desired_pos = self._desired_pos[0].clone()
                 # applied_effort is on the asset's device
                 applied_effort = self._select_joints(self._asset.data.applied_torque.torch).clone()
             # Move data to CPU
+            desired_pos_cpu = desired_pos.cpu()
             applied_effort_cpu = applied_effort.cpu()
-            # Update all effort bars
+            # Keep position sliders synchronized with an active transition and update effort bars.
             for i in range(len(self._joint_names)):
+                dpg.set_value(pos_slider_tags[i], float(desired_pos_cpu[i]))
                 effort_val = float(applied_effort_cpu[0, i])
                 # For vertical bar, we update the y-value (height) and keep x-value (position) constant.
                 dpg.set_value(effort_bar_tags[i], [[0.0], [effort_val]])
@@ -300,8 +307,9 @@ class JointPositionGUIAction(JointPositionAction):
 
     def process_actions(self, actions: torch.Tensor) -> None:  # noqa: D401, ARG002
         """Ignore incoming policy actions; GUI values are authoritative."""
-        # No-op to ensure that RL actions don't override GUI commands.
-        return None
+        # Advance once per control step so the duration is independent of physics
+        # decimation and rendering speed.
+        self._advance_position_transition(self._env.step_dt)
 
     def apply_actions(self) -> None:  # noqa: D401
         """Send joint targets from GUI to the articulation."""
@@ -331,57 +339,138 @@ class JointPositionGUIAction(JointPositionAction):
 
         self._asset.set_joint_position_target(full_pos, joint_ids=self._joint_ids)
 
-        # Apply PD gains
-        if isinstance(self._joint_ids, slice):
-            # Create a tensor representing the range of the slice
-            joint_ids_tensor = torch.arange(
-                self._joint_ids.start or 0,
-                self._joint_ids.stop,
-                self._joint_ids.step or 1,
-                device=self.device,
-            )
-        else:
-            joint_ids_tensor = torch.tensor(self._joint_ids, device=self.device)
-
-        # Create a full tensor for all stiffness and damping values
-        full_stiffness = torch.cat(
-            [actuator.stiffness.clone() for actuator in self._asset.actuators.values()],
-            dim=1,
-        )
-        full_damping = torch.cat(
-            [actuator.damping.clone() for actuator in self._asset.actuators.values()],
-            dim=1,
-        )
-
-        # Update the values for the selected joints
-        full_stiffness[:, joint_ids_tensor] = target_stiffness
-        full_damping[:, joint_ids_tensor] = target_damping
-
-        # Distribute the updated values back to the actuators
-        offset = 0
-        for actuator in self._asset.actuators.values():
-            num_dof = actuator.stiffness.shape[1]
-            actuator.stiffness[:] = full_stiffness.narrow(1, offset, num_dof)
-            actuator.damping[:] = full_damping.narrow(1, offset, num_dof)
-            offset += num_dof
+        self._write_selected_actuator_property("stiffness", target_stiffness)
+        self._write_selected_actuator_property("damping", target_damping)
 
     # ---------------------------------------------------------------------
     # Misc helpers
     # ---------------------------------------------------------------------
 
-    def reset(self, env_ids: torch.Tensor | None = None) -> None:  # noqa: D401
+    def reset(self, env_ids: Sequence[int] | torch.Tensor | slice | None = None) -> None:  # noqa: D401
         """Reset the action term (called on environment reset)."""
         super().reset(env_ids)
-        # Synchronize GUI sliders with environment after reset (optional)
-        if env_ids is None or 0 in env_ids:
+        if env_ids is None:
+            resets_first_env = True
+        elif isinstance(env_ids, slice):
+            resets_first_env = 0 in range(self.num_envs)[env_ids]
+        else:
+            resets_first_env = 0 in env_ids
+
+        if resets_first_env:
             with self._lock:
                 self._desired_pos[...] = self._select_joints(self._asset.data.joint_pos.torch).clone()
                 self._desired_stiffness[...] = self._default_stiffness.clone()
                 self._desired_damping[...] = self._default_damping.clone()
+                self._position_transition_active = False
 
     # ------------------------------------------------------------------
     # Helper utilities
     # ------------------------------------------------------------------
+
+    def _start_position_transition(self, target_position: torch.Tensor, *, restore_default_gains: bool = False) -> None:
+        """Start a smooth transition from the current command to ``target_position``."""
+        target_position = torch.as_tensor(
+            target_position,
+            device=self._desired_pos.device,
+            dtype=self._desired_pos.dtype,
+        )
+        if target_position.ndim == 1:
+            target_position = target_position.unsqueeze(0).expand_as(self._desired_pos)
+        elif target_position.shape == (1, self._desired_pos.shape[1]):
+            target_position = target_position.expand_as(self._desired_pos)
+        elif target_position.shape != self._desired_pos.shape:
+            raise ValueError(
+                f"Expected target position shape {tuple(self._desired_pos.shape)}, got {tuple(target_position.shape)}"
+            )
+
+        with self._lock:
+            self._position_transition_start.copy_(self._desired_pos)
+            self._position_transition_target.copy_(target_position)
+            self._position_transition_elapsed_s = 0.0
+            self._position_transition_duration_s = self._pose_transition_duration_s
+            self._position_transition_active = True
+            if restore_default_gains:
+                self._desired_stiffness.copy_(self._default_stiffness)
+                self._desired_damping.copy_(self._default_damping)
+
+    def _start_default_position_transition(self) -> None:
+        """Smoothly return to the default pose and immediately restore default gains."""
+        default_position = self._select_joints(self._asset.data.default_joint_pos.torch)
+        self._start_position_transition(default_position, restore_default_gains=True)
+
+    def _advance_position_transition(self, dt: float) -> None:
+        """Advance the active pose transition by one control timestep."""
+        with self._lock:
+            if not self._position_transition_active:
+                return
+
+            self._position_transition_elapsed_s = min(
+                self._position_transition_elapsed_s + float(dt), self._position_transition_duration_s
+            )
+            progress = self._position_transition_elapsed_s / self._position_transition_duration_s
+            # Quintic minimum-jerk blend: zero velocity and acceleration at both ends.
+            blend = progress**3 * (10.0 + progress * (-15.0 + 6.0 * progress))
+            self._desired_pos.copy_(
+                torch.lerp(self._position_transition_start, self._position_transition_target, blend)
+            )
+
+            if progress >= 1.0:
+                self._desired_pos.copy_(self._position_transition_target)
+                self._position_transition_active = False
+
+    def _set_desired_joint_position(self, joint_index: int, position: float) -> None:
+        """Apply a manual slider edit and cancel any active pose transition."""
+        with self._lock:
+            self._position_transition_active = False
+            self._desired_pos[:, joint_index] = position
+
+    def _resolve_actuator_bindings(self) -> list[tuple[object, torch.Tensor, torch.Tensor]]:
+        """Map each selected action joint to its column in the owning actuator."""
+        action_columns = {joint_name: column for column, joint_name in enumerate(self._joint_names)}
+        if len(action_columns) != len(self._joint_names):
+            raise ValueError(f"Duplicate joint names in GUI action: {self._joint_names}")
+
+        bindings = []
+        covered_joint_names = set()
+        for actuator in self._asset.actuators.values():
+            actuator_columns = []
+            selected_columns = []
+            for actuator_column, joint_name in enumerate(actuator.joint_names):
+                selected_column = action_columns.get(joint_name)
+                if selected_column is not None:
+                    actuator_columns.append(actuator_column)
+                    selected_columns.append(selected_column)
+                    covered_joint_names.add(joint_name)
+
+            if actuator_columns:
+                bindings.append(
+                    (
+                        actuator,
+                        torch.tensor(actuator_columns, dtype=torch.long, device=self.device),
+                        torch.tensor(selected_columns, dtype=torch.long, device=self.device),
+                    )
+                )
+
+        uncovered_joint_names = set(self._joint_names) - covered_joint_names
+        if uncovered_joint_names:
+            raise ValueError(f"GUI action joints have no actuator: {sorted(uncovered_joint_names)}")
+
+        return bindings
+
+    def _read_selected_actuator_property(self, property_name: str) -> torch.Tensor:
+        """Read an actuator property in the selected action-joint order."""
+        first_actuator = self._actuator_bindings[0][0]
+        selected_values = getattr(first_actuator, property_name).new_zeros((self.num_envs, len(self._joint_names)))
+        for actuator, actuator_columns, selected_columns in self._actuator_bindings:
+            actuator_values = getattr(actuator, property_name)
+            selected_values[:, selected_columns] = actuator_values[:, actuator_columns]
+        return selected_values
+
+    def _write_selected_actuator_property(self, property_name: str, selected_values: torch.Tensor) -> None:
+        """Write selected action-joint values back to their owning actuators."""
+        for actuator, actuator_columns, selected_columns in self._actuator_bindings:
+            actuator_values = getattr(actuator, property_name)
+            actuator_values[:, actuator_columns] = selected_values[:, selected_columns]
 
     def _select_joints(self, tensor: torch.Tensor) -> torch.Tensor:
         """Safely select the joint columns specified by *self._joint_ids* from *tensor*.

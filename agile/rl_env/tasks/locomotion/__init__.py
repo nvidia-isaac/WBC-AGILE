@@ -13,4 +13,4 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from . import g1, t1  # noqa: F401, F403
+from . import g1, h2, t1  # noqa: F401, F403

@@ -27,9 +27,10 @@ import warnings
 from dataclasses import dataclass
 from pathlib import Path
 
-import gymnasium as gym
 import pytest
 import torch
+
+from agile.evaluation.task_catalog import registered_agile_trainable_task_ids
 
 pytestmark = pytest.mark.e2e
 
@@ -60,6 +61,7 @@ class E2ETask:
 E2E_TASKS: list[E2ETask] = [
     # Training-only for now (checkpoints to be added later).
     E2ETask("Velocity-G1-History-v0"),
+    E2ETask("Velocity-H2-History-v0"),
     E2ETask("Velocity-Height-G1-History-v0"),
     E2ETask("Velocity-Height-G1-Student-Recurrent-v0"),
     E2ETask("Velocity-Height-G1-Student-History-v0"),
@@ -152,17 +154,49 @@ def _training_overrides(task: str) -> list[str]:
 def test_every_registered_task_is_covered_or_skipped() -> None:
     """Force new tasks into the e2e matrix: every registered trainable AGILE task must be in
     E2E_TASKS or explicitly listed in E2E_SKIP."""
-    import agile.rl_env.tasks  # noqa: F401
-
-    registered = {
-        task_id
-        for task_id, spec in gym.registry.items()
-        if str((spec.kwargs or {}).get("env_cfg_entry_point", "")).startswith("agile.rl_env.tasks.")
-        and "rsl_rl_cfg_entry_point" in (spec.kwargs or {})
-    }
     covered = {t.task_id for t in E2E_TASKS} | set(E2E_SKIP)
-    missing = sorted(registered - covered)
+    missing = sorted(registered_agile_trainable_task_ids() - covered)
     assert missing == [], f"Tasks neither covered nor skipped: {missing}"
+
+
+def _run_missing_training_task(**kwargs) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [
+            sys.executable,
+            str(TRAIN_SCRIPT),
+            "--task",
+            "Missing-AGILE-Task-v0",
+            "--max_iterations",
+            "1",
+            "--num_envs",
+            "1",
+            "--headless",
+        ],
+        check=False,
+        timeout=120,
+        text=True,
+        env=_e2e_env(),
+        **kwargs,
+    )
+
+
+def test_training_process_propagates_startup_failures() -> None:
+    """A task-registration failure must make the training process fail."""
+    result = _run_missing_training_task(capture_output=True)
+
+    assert result.returncode != 0, (
+        f"training startup failure returned zero\nstdout:\n{result.stdout[-2000:]}\nstderr:\n{result.stderr[-2000:]}"
+    )
+    assert "gymnasium.error.NameNotFound" in result.stderr, result.stderr[-2000:]
+    assert "Missing-AGILE-Task" in result.stderr, result.stderr[-2000:]
+
+
+def test_training_process_failure_survives_diagnostic_io_errors() -> None:
+    """Diagnostic stream failures must not mask the training process failure."""
+    with Path("/dev/full").open("w") as full_stderr:
+        result = _run_missing_training_task(stdout=subprocess.PIPE, stderr=full_stderr)
+
+    assert result.returncode != 0, f"diagnostic I/O failure masked training failure\nstdout:\n{result.stdout[-2000:]}"
 
 
 @pytest.mark.parametrize("task", [t.task_id for t in E2E_TASKS], ids=str)

@@ -117,7 +117,6 @@ sim2mujoco
 
 remote-training
 testing
-AGILE v1.3.2 <releases/v1.3.2>
 AGILE v1.3.1 <releases/v1.3.1>
 AGILE v1.3.0 <releases/v1.3.0>
 Release note template <releases/_template>

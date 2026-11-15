@@ -110,6 +110,59 @@ def _offscreen_video_is_only_kit_consumer(env: gym.Env, app_launcher: Any) -> bo
     return True
 
 
+def _hide_non_recorded_environments(
+    env: gym.Env | Any,
+    *,
+    set_visibility: Any | None = None,
+    envs_prim_path: str = "/World/envs",
+) -> int:
+    """Hide cloned environments that cannot appear in the offscreen recording.
+
+    Kit otherwise builds RTX acceleration structures for every cloned robot,
+    even though the configured viewer follows only one environment.  Physics
+    is unaffected because USD visibility applies only to rendering.
+    """
+    unwrapped = getattr(env, "unwrapped", env)
+    cfg = getattr(unwrapped, "cfg", None)
+    viewer_cfg = getattr(cfg, "viewer", None)
+    scene = getattr(unwrapped, "scene", None)
+    scene_cfg = getattr(cfg, "scene", None)
+    num_envs = getattr(scene, "num_envs", getattr(scene_cfg, "num_envs", 0))
+    recorded_env_index = getattr(viewer_cfg, "env_index", 0)
+
+    if not isinstance(num_envs, int) or num_envs <= 1:
+        return 0
+    if not isinstance(recorded_env_index, int) or not 0 <= recorded_env_index < num_envs:
+        return 0
+
+    if set_visibility is None:
+        import omni.usd
+        from pxr import UsdGeom
+
+        stage = omni.usd.get_context().get_stage()
+
+        def set_visibility(prim_path: str, visible: bool) -> bool:
+            prim = stage.GetPrimAtPath(prim_path)
+            if not prim.IsValid():
+                return False
+            imageable = UsdGeom.Imageable(prim)
+            if not imageable:
+                return False
+            if visible:
+                imageable.MakeVisible()
+            else:
+                imageable.MakeInvisible()
+            return True
+
+    hidden_count = 0
+    for env_index in range(num_envs):
+        if env_index == recorded_env_index:
+            continue
+        prim_path = f"{envs_prim_path}/env_{env_index}"
+        hidden_count += bool(set_visibility(prim_path, False))
+    return hidden_count
+
+
 class _SuppressStepKitPumping(gym.Wrapper):
     """Suppress Kit pumping only while delegating an environment step."""
 
@@ -141,5 +194,8 @@ class EfficientRecordVideo(gym.wrappers.RecordVideo):
     def __init__(self, env: gym.Env, *args: Any, app_launcher: Any, **kwargs: Any):
         env = _TrackAssetRootKitRecordingCamera(env)
         if _offscreen_video_is_only_kit_consumer(env, app_launcher):
+            hidden_count = _hide_non_recorded_environments(env)
+            if hidden_count:
+                print(f"[INFO] Offscreen video renderer hid {hidden_count} non-recorded environments.")
             env = _SuppressStepKitPumping(env)
         super().__init__(env, *args, **kwargs)

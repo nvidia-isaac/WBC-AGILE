@@ -22,12 +22,24 @@
 # flake8: noqa
 
 import argparse
+import os
 import sys
+import traceback
 
 from isaaclab.app import AppLauncher
 
 # local imports
 import cli_args  # isort: skip
+
+
+def _report_failure_and_exit() -> None:
+    """Report the active exception and exit before Kit can mask the status."""
+    try:
+        traceback.print_exc()
+        sys.stdout.flush()
+        sys.stderr.flush()
+    finally:
+        os._exit(1)
 
 
 # add argparse arguments
@@ -67,13 +79,15 @@ if args_cli.video:
 sys.argv = [sys.argv[0]] + hydra_args
 
 # launch omniverse app
-app_launcher = AppLauncher(args_cli)
-simulation_app = app_launcher.app
+try:
+    app_launcher = AppLauncher(args_cli)
+    simulation_app = app_launcher.app
+except BaseException:
+    _report_failure_and_exit()
 
 """Rest everything follows."""
 
 import gymnasium as gym
-import os
 import torch
 from datetime import datetime
 from pathlib import Path
@@ -217,7 +231,12 @@ def main(
 
 
 if __name__ == "__main__":
-    # run the main function
-    main()
-    # close sim app
-    simulation_app.close()
+    try:
+        # run the main function
+        main()
+    except BaseException:
+        # Kit shutdown exits with status zero, so report and hard-exit before its
+        # finalizer can mask a training or startup failure.
+        _report_failure_and_exit()
+    else:
+        simulation_app.close()

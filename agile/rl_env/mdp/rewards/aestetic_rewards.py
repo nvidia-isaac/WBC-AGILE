@@ -399,6 +399,60 @@ def if_standing(
     return is_standing.float()
 
 
+def _remove_body_frame_offsets(body_quat: torch.Tensor, frame_offset_quat_inv: torch.Tensor) -> torch.Tensor:
+    """Express body orientations in semantic frames instead of asset-authored link frames."""
+    return math_utils.quat_mul(body_quat, frame_offset_quat_inv.unsqueeze(0).expand_as(body_quat))
+
+
+def _feet_roll_l2_from_quat(feet_quat: torch.Tensor) -> torch.Tensor:
+    roll, _, _ = agile_math_utils.euler_xyz_from_quat(feet_quat.reshape(-1, 4))
+    feet_roll = roll.reshape(feet_quat.shape[:2])
+    feet_roll = (feet_roll + torch.pi) % (2 * torch.pi) - torch.pi
+    return torch.sum(torch.square(feet_roll), dim=-1)
+
+
+def _feet_yaw_diff_l2_from_quat(feet_quat: torch.Tensor) -> torch.Tensor:
+    _, _, yaw = agile_math_utils.euler_xyz_from_quat(feet_quat.reshape(-1, 4))
+    feet_yaw = yaw.reshape(feet_quat.shape[:2])
+    feet_yaw = (feet_yaw + torch.pi) % (2 * torch.pi) - torch.pi
+    yaw_diff = (feet_yaw[:, 1] - feet_yaw[:, 0] + torch.pi) % (2 * torch.pi) - torch.pi
+    return torch.square(yaw_diff)
+
+
+def _feet_yaw_mean_vs_base_from_quat(feet_quat: torch.Tensor, base_quat: torch.Tensor) -> torch.Tensor:
+    base_quat_inv = math_utils.quat_inv(base_quat)
+    feet_quat_relative = math_utils.quat_mul(base_quat_inv.unsqueeze(1).expand_as(feet_quat), feet_quat)
+    _, _, feet_yaw_relative = math_utils.euler_xyz_from_quat(feet_quat_relative.reshape(-1, 4))
+    return torch.square(feet_yaw_relative.reshape(feet_quat.shape[:2])).sum(dim=1)
+
+
+def _reduce_foot_yaw_penalty_for_turning(
+    env: ManagerBasedRLEnv,
+    penalty: torch.Tensor,
+    command_name: str | None,
+    ang_vel_threshold: float,
+    reduction_scale: float,
+) -> torch.Tensor:
+    if command_name is None:
+        return penalty
+    ang_vel_magnitude = torch.abs(env.command_manager.get_command(command_name)[:, 2])
+    scale_factor = torch.where(
+        ang_vel_magnitude <= ang_vel_threshold,
+        torch.ones_like(ang_vel_magnitude),
+        torch.clamp(1.0 - reduction_scale * (ang_vel_magnitude - ang_vel_threshold), min=0.0),
+    )
+    return penalty * scale_factor
+
+
+class _FrameCorrectedReward(ManagerTermBase):
+    """Cache inverse body-frame offsets once instead of allocating them every simulation step."""
+
+    def __init__(self, cfg: RewardTermCfg, env: ManagerBasedRLEnv):
+        super().__init__(cfg, env)
+        frame_offset_quat = torch.tensor(cfg.params["frame_offset_quat"], device=env.device, dtype=torch.float32)
+        self._frame_offset_quat_inv = math_utils.quat_inv(frame_offset_quat)
+
+
 def feet_roll_l2(
     env: ManagerBasedRLEnv,
     asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
@@ -412,17 +466,23 @@ def feet_roll_l2(
     # Get feet quaternions
     feet_quat = asset.data.body_quat_w.torch[:, asset_cfg.body_ids]  # [num_envs, num_feet, 4]
 
-    # Extract roll angles from quaternions
-    # Using Isaac Lab's math utils to extract euler angles
-    feet_quat_flat = feet_quat.reshape(-1, 4)  # [num_envs * num_feet, 4]
-    roll, _, _ = agile_math_utils.euler_xyz_from_quat(feet_quat_flat)
+    return _feet_roll_l2_from_quat(feet_quat)
 
-    # Reshape back to [num_envs, num_feet] and normalize roll to [-pi, pi]
-    feet_roll = roll.reshape(env.num_envs, len(asset_cfg.body_ids))
-    feet_roll = (feet_roll + torch.pi) % (2 * torch.pi) - torch.pi
 
-    # Return sum of squared roll angles (Isaac Gym style)
-    return torch.sum(torch.square(feet_roll), dim=-1)
+class frame_corrected_feet_roll_l2(_FrameCorrectedReward):
+    """Penalize foot roll after removing an asset's authored body-frame offsets."""
+
+    def __call__(
+        self,
+        env: ManagerBasedRLEnv,
+        frame_offset_quat: tuple[tuple[float, float, float, float], ...],  # noqa: ARG002
+        asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+    ) -> torch.Tensor:
+        asset: Articulation = env.scene[asset_cfg.name]
+        feet_quat = _remove_body_frame_offsets(
+            asset.data.body_quat_w.torch[:, asset_cfg.body_ids], self._frame_offset_quat_inv
+        )
+        return _feet_roll_l2_from_quat(feet_quat)
 
 
 def feet_yaw_diff_l2(
@@ -453,38 +513,28 @@ def feet_yaw_diff_l2(
     if len(asset_cfg.body_ids) != 2:
         return torch.zeros(env.num_envs, device=env.device)
 
-    # Extract yaw angles for both feet
-    feet_quat_flat = feet_quat.reshape(-1, 4)  # [num_envs * 2, 4]
-    _, _, yaw = agile_math_utils.euler_xyz_from_quat(feet_quat_flat)
+    penalty = _feet_yaw_diff_l2_from_quat(feet_quat)
+    return _reduce_foot_yaw_penalty_for_turning(env, penalty, command_name, ang_vel_threshold, reduction_scale)
 
-    # Reshape to [num_envs, 2] and normalize yaw to [-pi, pi]
-    feet_yaw = yaw.reshape(env.num_envs, 2)
-    feet_yaw = (feet_yaw + torch.pi) % (2 * torch.pi) - torch.pi
 
-    # Compute yaw difference between right foot (index 1) and left foot (index 0)
-    yaw_diff = (feet_yaw[:, 1] - feet_yaw[:, 0] + torch.pi) % (2 * torch.pi) - torch.pi
+class frame_corrected_feet_yaw_diff_l2(_FrameCorrectedReward):
+    """Penalize foot yaw difference after removing authored body-frame offsets."""
 
-    # Compute base penalty
-    penalty = torch.square(yaw_diff)
-
-    # Reduce penalty when turning (if command_name is provided)
-    if command_name is not None:
-        ang_vel_cmd = env.command_manager.get_command(command_name)[:, 2]  # Angular z command
-
-        # Compute scaling factor based on angular velocity magnitude
-        # When |ang_vel| > threshold, reduce penalty proportionally
-        ang_vel_magnitude = torch.abs(ang_vel_cmd)
-
-        # Smooth reduction: 1.0 when |ang_vel| <= threshold, decreasing towards 0 as |ang_vel| increases
-        scale_factor = torch.where(
-            ang_vel_magnitude <= ang_vel_threshold,
-            torch.ones_like(ang_vel_magnitude),
-            torch.clamp(1.0 - reduction_scale * (ang_vel_magnitude - ang_vel_threshold), min=0.0),
+    def __call__(
+        self,
+        env: ManagerBasedRLEnv,
+        frame_offset_quat: tuple[tuple[float, float, float, float], ...],  # noqa: ARG002
+        asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+        command_name: str | None = None,
+        ang_vel_threshold: float = 0.3,
+        reduction_scale: float = 2.0,
+    ) -> torch.Tensor:
+        asset: Articulation = env.scene[asset_cfg.name]
+        feet_quat = _remove_body_frame_offsets(
+            asset.data.body_quat_w.torch[:, asset_cfg.body_ids], self._frame_offset_quat_inv
         )
-
-        penalty = penalty * scale_factor
-
-    return penalty
+        penalty = _feet_yaw_diff_l2_from_quat(feet_quat)
+        return _reduce_foot_yaw_penalty_for_turning(env, penalty, command_name, ang_vel_threshold, reduction_scale)
 
 
 def feet_yaw_mean_vs_base(
@@ -522,37 +572,30 @@ def feet_yaw_mean_vs_base(
     if len(base_body_cfg.body_ids) != 1:
         raise ValueError("Only one reference body is supported for feet_yaw_mean_vs_base reward.")
 
-    # Express feet quaternions in base frame
-    base_quat_inv = math_utils.quat_inv(base_quat)  # [num_envs, 4]
-    feet_quat_relative = math_utils.quat_mul(
-        base_quat_inv.unsqueeze(1).expand(-1, 2, -1), feet_quat
-    )  # [num_envs, 2, 4]
+    penalty = _feet_yaw_mean_vs_base_from_quat(feet_quat, base_quat)
+    return _reduce_foot_yaw_penalty_for_turning(env, penalty, command_name, ang_vel_threshold, reduction_scale)
 
-    # Extract yaw from relative quaternions (no reshaping needed)
-    _, _, feet_yaw_relative = math_utils.euler_xyz_from_quat(feet_quat_relative.view(-1, 4))
-    feet_yaw_relative = feet_yaw_relative.view(env.num_envs, 2)
 
-    # Compute base penalty
-    penalty = torch.square(feet_yaw_relative).sum(dim=1)
+class frame_corrected_feet_yaw_mean_vs_base(_FrameCorrectedReward):
+    """Penalize foot yaw relative to the base after removing authored foot-frame offsets."""
 
-    # Reduce penalty when turning (if command_name is provided)
-    if command_name is not None:
-        ang_vel_cmd = env.command_manager.get_command(command_name)[:, 2]  # Angular z command
-
-        # Compute scaling factor based on angular velocity magnitude
-        # When |ang_vel| > threshold, reduce penalty proportionally
-        ang_vel_magnitude = torch.abs(ang_vel_cmd)
-
-        # Smooth reduction: 1.0 when |ang_vel| <= threshold, decreasing towards 0 as |ang_vel| increases
-        scale_factor = torch.where(
-            ang_vel_magnitude <= ang_vel_threshold,
-            torch.ones_like(ang_vel_magnitude),
-            torch.clamp(1.0 - reduction_scale * (ang_vel_magnitude - ang_vel_threshold), min=0.0),
+    def __call__(
+        self,
+        env: ManagerBasedRLEnv,
+        frame_offset_quat: tuple[tuple[float, float, float, float], ...],  # noqa: ARG002
+        feet_asset_cfg: SceneEntityCfg,
+        base_body_cfg: SceneEntityCfg,
+        command_name: str | None = None,
+        ang_vel_threshold: float = 0.3,
+        reduction_scale: float = 2.0,
+    ) -> torch.Tensor:
+        asset: Articulation = env.scene[feet_asset_cfg.name]
+        feet_quat = _remove_body_frame_offsets(
+            asset.data.body_quat_w.torch[:, feet_asset_cfg.body_ids], self._frame_offset_quat_inv
         )
-
-        penalty = penalty * scale_factor
-
-    return penalty
+        base_quat = asset.data.body_quat_w.torch[:, base_body_cfg.body_ids].squeeze(1)
+        penalty = _feet_yaw_mean_vs_base_from_quat(feet_quat, base_quat)
+        return _reduce_foot_yaw_penalty_for_turning(env, penalty, command_name, ang_vel_threshold, reduction_scale)
 
 
 def feet_yaw_mean_vs_base_if_standing(
@@ -1229,6 +1272,26 @@ def flat_body_orientation_exp(
     orientation_error_per_env = torch.sum(orientation_error, dim=-1)  # sum over k bodies
 
     return torch.exp(-orientation_error_per_env / std**2)
+
+
+class frame_corrected_flat_body_orientation_exp(_FrameCorrectedReward):
+    """Reward flat body orientation after removing authored body-frame offsets."""
+
+    def __call__(
+        self,
+        env: ManagerBasedRLEnv,
+        std: float,
+        frame_offset_quat: tuple[tuple[float, float, float, float], ...],  # noqa: ARG002
+        asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+    ) -> torch.Tensor:
+        asset: RigidObject = env.scene[asset_cfg.name]
+        body_quats = _remove_body_frame_offsets(
+            asset.data.body_link_quat_w.torch[:, asset_cfg.body_ids], self._frame_offset_quat_inv
+        )
+        gravity = asset.data.GRAVITY_VEC_W.torch.unsqueeze(1).expand(-1, len(asset_cfg.body_ids), -1)
+        projected_gravity = math_utils.quat_apply_inverse(body_quats, gravity)
+        orientation_error = torch.sum(torch.square(projected_gravity[..., :2]), dim=(-1, -2))
+        return torch.exp(-orientation_error / std**2)
 
 
 def flat_orientation_if_null_cmd(

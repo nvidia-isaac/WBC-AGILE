@@ -55,6 +55,11 @@ TASK_CATALOG: tuple[TaskCatalogEntry, ...] = (
         TaskCatalogEntry(task, "trainable", mjcf=_T1_MJCF, evaluation_spec=_SPECS / f"{task}.yaml")
         for task in ("Velocity-T1-v0", "StandUp-T1-v0")
     ),
+    TaskCatalogEntry(
+        "Velocity-H2-History-v0",
+        "trainable",
+        public_evaluation=False,
+    ),
     *(
         TaskCatalogEntry(task, "excluded", reason)
         for task, reason in (

@@ -139,6 +139,25 @@ class TestUvProject(unittest.TestCase):
         if ci_path.is_file():
             self.assertEqual(ci_path.read_text().count("resource_group: agile-gpu-e2e"), 2)
 
+    def test_ci_submodule_init_discards_reused_runner_worktree(self) -> None:
+        ci_path = _REPO_ROOT / ".gitlab-ci.yml"
+        if not ci_path.is_file():
+            self.skipTest("Internal GitLab CI configuration is not part of the Public Release Surface")
+        ci_config = ci_path.read_text()
+
+        deinit = "git submodule deinit --force --all"
+        init = "git submodule init"
+        update = "git submodule update --init --force --recursive"
+        self.assertEqual(ci_config.count(deinit), 1)
+        self.assertEqual(ci_config.count(init), 2)
+        self.assertEqual(ci_config.count(update), 1)
+        first_init = ci_config.index(init)
+        deinit_position = ci_config.index(deinit)
+        second_init = ci_config.index(init, first_init + len(init))
+        self.assertLess(first_init, deinit_position)
+        self.assertLess(deinit_position, second_init)
+        self.assertLess(second_init, ci_config.index(update))
+
     def test_ci_lints_internal_and_generated_public_release_surface(self) -> None:
         ci_path = _REPO_ROOT / ".gitlab-ci.yml"
         if not ci_path.is_file():
